@@ -1,0 +1,89 @@
+Build a full-stack web application inspired by Litmatch (but not a clone), using Node.js, Express, Socket.io, and Bootstrap 5. The system must be fully functional and ready to run on Replit.
+
+REQUIREMENTS:
+
+1. USER AUTHENTICATION
+- Create Register and Login system using username and password.
+- Hash passwords using bcrypt.
+- Store users in a database (use SQLite or in-memory JSON if needed for simplicity).
+- After login, redirect user to dashboard.
+
+2. USER PROFILE
+- Each user has:
+  - username
+  - avatar (choose from default images)
+  - status (online/offline)
+- Show current user info in the UI.
+
+3. CHAT SYSTEM (REAL-TIME)
+- Use Socket.io for real-time communication.
+- Users can send and receive messages instantly.
+- Show username and timestamp on each message.
+- Auto-scroll chat to latest message.
+
+4. CHAT ROOMS
+- Create 6 rooms total:
+  - Global Room
+  - Room 1
+  - Room 2
+  - Room 3
+  - Room 4
+  - Room 5
+- Users can switch rooms.
+- Only messages from the current room should be visible.
+- Show list of online users per room.
+
+5. RANDOM MATCH SYSTEM (CORE FEATURE)
+- Add a button: “Start Random Match”
+- When clicked:
+  - Find another online user randomly
+  - Connect both users into a private chat room
+- Allow them to chat privately
+- Add button to exit match
+
+6. VOICE MESSAGE FEATURE
+- Allow users to record or upload short audio messages
+- Use multer for file upload
+- Save audio files in a folder (e.g., /uploads)
+- Display audio player in chat so others can play it
+
+7. FRONTEND (IMPORTANT)
+- Use HTML, CSS, JavaScript, and Bootstrap 5
+- Create:
+  - Login page
+  - Register page
+  - Chat dashboard
+- Dashboard layout:
+  - Left sidebar → rooms list
+  - Center → chat messages
+  - Right sidebar → online users
+- Make UI clean and modern (Discord-like layout)
+
+8. BACKEND STRUCTURE
+- Use Express for routing
+- Use Socket.io for real-time features
+- Organize files properly:
+  - server.js
+  - routes/
+  - public/
+  - uploads/
+- Serve static frontend files from /public
+
+9. EXTRA FEATURES
+- Show online users count
+- Prevent empty messages
+- Basic error handling
+- Keep system simple but working
+
+10. FINAL OUTPUT
+- Generate FULL project structure with all files
+- Ensure it runs with:
+  npm install
+  npm start
+- Must work directly in Replit without additional setup
+
+IMPORTANT:
+- Keep the system simple but complete
+- Avoid overcomplication
+- Make sure all features are connected and working
+- Ensure real-time chat, rooms, and random match are functional

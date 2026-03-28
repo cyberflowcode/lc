@@ -1,0 +1,16 @@
+packages:
+  "socket.io-client": "Real-time chat and matchmaking connections"
+  "framer-motion": "Smooth animations for UI and match overlay"
+  "date-fns": "Formatting message timestamps"
+  "zustand": "Global state management for auth and chat match state"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility to merge tailwind classes safely"
+
+images:
+  - path: "artifacts/chat-app/public/images/auth-bg.png"
+    description: "Abstract neon cyberpunk grid background, dark purple and cyan glowing lines, gaming aesthetic"
+    aspect_ratio: "16:9"
+
+notes:
+  - "Assuming Socket.io connects to same origin at /socket.io path"
+  - "JWT tokens are stored in localStorage and passed via Authorization: Bearer header"
