@@ -82,7 +82,10 @@ export function useChat() {
   };
 
   const startMatch = () => socketRef.current?.emit('start-match', { token });
-  const exitMatch = () => socketRef.current?.emit('exit-match');
+  const exitMatch = () => {
+    socketRef.current?.emit('exit-match');
+    useStore.getState().clearMatch();
+  };
 
   return { sendMessage, startMatch, exitMatch };
 }
