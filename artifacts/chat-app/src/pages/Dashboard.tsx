@@ -8,7 +8,7 @@ import { ChatBubble } from '@/components/ChatBubble';
 import { MatchOverlay } from '@/components/MatchOverlay';
 import { 
   LogOut, Hash, Send, Mic, Square, Loader2, 
-  Users, Zap, ChevronLeft, Globe
+  Users, Zap, ChevronLeft, Globe, Gamepad2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
