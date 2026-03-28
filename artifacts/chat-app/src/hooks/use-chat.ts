@@ -22,13 +22,16 @@ export function useChat() {
     });
 
     socket.on('message', (msg: Message) => {
-      // Update public room cache
-      queryClient.setQueryData(getGetRoomMessagesQueryKey(msg.room), (old: Message[] | undefined) => {
-        if (!old) return [msg];
-        // Prevent duplicates
-        if (old.some(m => m.id === msg.id)) return old;
-        return [...old, msg];
-      });
+      // Use setQueriesData (prefix-match) so it catches any params variant e.g. { limit: 50 }
+      queryClient.setQueriesData(
+        { queryKey: getGetRoomMessagesQueryKey(msg.room) },
+        (old: unknown) => {
+          const msgs = old as Message[] | undefined;
+          if (!msgs) return [msg];
+          if (msgs.some(m => m.id === msg.id)) return msgs;
+          return [...msgs, msg];
+        }
+      );
     });
 
     socket.on('room-users', ({ room, users }) => {
