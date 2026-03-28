@@ -1,7 +1,8 @@
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HttpServer } from "http";
 import { verifyToken, extractToken } from "./auth.js";
-import { db, messagesTable } from "@workspace/db";
+import { db, messagesTable, matchSessionsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 
 interface ConnectedUser {
@@ -131,6 +132,13 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         socket.join(matchId);
         io.sockets.sockets.get(partner.socketId)?.join(matchId);
 
+        // Persist session to DB
+        db.insert(matchSessionsTable).values({
+          matchId,
+          user1: payload.username,
+          user2: partner.username,
+        }).catch(err => logger.error({ err }, "Failed to save match session"));
+
         socket.emit("match-found", {
           matchId,
           partner: { username: partner.username, avatar: partner.avatar },
@@ -153,7 +161,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       }
     });
 
-    socket.on("match-message", ({ matchId, content, messageType, audioUrl }: {
+    socket.on("match-message", async ({ matchId, content, messageType, audioUrl }: {
       matchId: string;
       content?: string;
       messageType: string;
@@ -163,16 +171,29 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       if (!user) return;
       if (messageType === "text" && (!content || !content.trim())) return;
 
-      io.to(matchId).emit("match-message", {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        room: matchId,
-        username: user.username,
-        avatar: user.avatar,
-        content: content ?? null,
-        audioUrl: audioUrl ?? null,
-        messageType,
-        createdAt: new Date().toISOString(),
-      });
+      try {
+        const [saved] = await db.insert(messagesTable).values({
+          room: matchId,
+          username: user.username,
+          avatar: user.avatar,
+          content: content ?? null,
+          audioUrl: audioUrl ?? null,
+          messageType,
+        }).returning();
+
+        io.to(matchId).emit("match-message", {
+          id: saved.id,
+          room: saved.room,
+          username: saved.username,
+          avatar: saved.avatar,
+          content: saved.content,
+          audioUrl: saved.audioUrl,
+          messageType: saved.messageType,
+          createdAt: saved.createdAt,
+        });
+      } catch (err) {
+        logger.error({ err }, "Failed to save match message");
+      }
     });
 
     socket.on("exit-match", () => {
