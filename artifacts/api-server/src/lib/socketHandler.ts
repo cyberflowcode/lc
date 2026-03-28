@@ -58,6 +58,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
 
       logger.info({ username: payload.username, room }, "User joined room");
       emitRoomUsers(io, room);
+      emitAllUsers(io);
     });
 
     socket.on("leave-room", ({ room }: { room: string }) => {
@@ -203,6 +204,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         emitRoomUsers(io, user.currentRoom);
       }
       connectedUsers.delete(socket.id);
+      emitAllUsers(io);
     });
   });
 
@@ -217,4 +219,22 @@ function emitRoomUsers(io: SocketIOServer, room: string): void {
     }
   }
   io.to(room).emit("room-users", { room, users });
+}
+
+function emitAllUsers(io: SocketIOServer): void {
+  // Deduplicate by username (a user might have multiple tabs open)
+  const seen = new Set<string>();
+  const users: { username: string; avatar: string; status: string; room: string }[] = [];
+  for (const [, user] of connectedUsers) {
+    if (!seen.has(user.username)) {
+      seen.add(user.username);
+      users.push({
+        username: user.username,
+        avatar: user.avatar,
+        status: "online",
+        room: user.currentRoom || "",
+      });
+    }
+  }
+  io.emit("all-users", { users, count: users.length });
 }

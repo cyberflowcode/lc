@@ -4,6 +4,13 @@ import type { User, Message } from '@workspace/api-client-react';
 
 export type MatchState = 'idle' | 'searching' | 'matched';
 
+export interface OnlineUser {
+  username: string;
+  avatar: string;
+  status: string;
+  room: string;
+}
+
 interface AppState {
   token: string | null;
   user: User | null;
@@ -23,6 +30,10 @@ interface AppState {
 
   roomUsers: Record<string, Partial<User>[]>;
   setRoomUsers: (room: string, users: Partial<User>[]) => void;
+
+  allOnlineUsers: OnlineUser[];
+  totalOnlineCount: number;
+  setAllOnlineUsers: (users: OnlineUser[], count: number) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -46,6 +57,10 @@ export const useStore = create<AppState>()(
 
       roomUsers: {},
       setRoomUsers: (room, users) => set((s) => ({ roomUsers: { ...s.roomUsers, [room]: users } })),
+
+      allOnlineUsers: [],
+      totalOnlineCount: 0,
+      setAllOnlineUsers: (users, count) => set({ allOnlineUsers: users, totalOnlineCount: count }),
     }),
     {
       name: 'litchat-storage',

@@ -17,7 +17,7 @@ const ROOMS = ['Global', 'Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5'];
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
-  const { token, user, logout, activeRoom, setActiveRoom, matchState, matchPartner, matchMessages, roomUsers } = useStore();
+  const { token, user, logout, activeRoom, setActiveRoom, matchState, matchPartner, matchMessages, roomUsers, allOnlineUsers, totalOnlineCount } = useStore();
   const { toast } = useToast();
   
   // Guard
@@ -289,30 +289,39 @@ export default function Dashboard() {
         </div>
       </main>
 
-      {/* Right Sidebar - Online Users (Hidden in private match) */}
+      {/* Right Sidebar - All Online Users (Hidden in private match) */}
       {matchState !== 'matched' && (
         <aside className="w-64 bg-card border-l border-border hidden lg:flex flex-col">
           <div className="p-5 border-b border-border">
             <h3 className="font-bold flex items-center gap-2 text-white">
-              <Users size={18} className="text-primary" /> 
-              Online - {currentOnlineUsers.length}
+              <Users size={18} className="text-primary" />
+              <span>Online</span>
+              <span className="ml-auto bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded-full border border-green-500/30">
+                {totalOnlineCount}
+              </span>
             </h3>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {currentOnlineUsers.map((u, i) => (
-              <div key={i} className="flex items-center gap-3 group cursor-default">
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-lg border border-white/5 group-hover:border-primary/50 transition-colors">
-                    {u.avatar}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {allOnlineUsers.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center mt-4">No one online yet</p>
+            ) : (
+              allOnlineUsers.map((u, i) => (
+                <div key={`${u.username}-${i}`} className="flex items-center gap-3 group cursor-default">
+                  <div className="relative flex-shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-base border border-white/5 group-hover:border-primary/50 transition-colors">
+                      {u.avatar}
+                    </div>
+                    <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-card rounded-full" />
                   </div>
-                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-card rounded-full" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-semibold text-white/90 truncate">{u.username}</span>
+                    <span className="text-[10px] text-muted-foreground truncate">
+                      {u.room || 'Online'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-white/90">{u.username}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Online</span>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </aside>
       )}

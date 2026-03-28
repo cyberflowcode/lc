@@ -6,7 +6,7 @@ import { getGetRoomMessagesQueryKey, type Message } from '@workspace/api-client-
 
 export function useChat() {
   const socketRef = useRef<Socket | null>(null);
-  const { token, activeRoom, setRoomUsers, matchState, setMatchState, addMatchMessage, clearMatch } = useStore();
+  const { token, activeRoom, setRoomUsers, setAllOnlineUsers, matchState, setMatchState, addMatchMessage, clearMatch } = useStore();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -33,6 +33,10 @@ export function useChat() {
 
     socket.on('room-users', ({ room, users }) => {
       setRoomUsers(room, users);
+    });
+
+    socket.on('all-users', ({ users, count }: { users: { username: string; avatar: string; status: string; room: string }[]; count: number }) => {
+      setAllOnlineUsers(users, count);
     });
 
     socket.on('waiting-for-match', () => {
