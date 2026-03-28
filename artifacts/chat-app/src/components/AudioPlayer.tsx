@@ -27,14 +27,19 @@ export function AudioPlayer({ src, className }: { src: string; className?: strin
     }
   }, []);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (!audioRef.current) return;
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch {
+        // Play interrupted or blocked — ignore
+      }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const formatTime = (secs: number) => {

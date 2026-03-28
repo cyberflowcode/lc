@@ -164,12 +164,14 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       if (messageType === "text" && (!content || !content.trim())) return;
 
       io.to(matchId).emit("match-message", {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        room: matchId,
         username: user.username,
         avatar: user.avatar,
-        content,
-        audioUrl,
+        content: content ?? null,
+        audioUrl: audioUrl ?? null,
         messageType,
-        createdAt: new Date(),
+        createdAt: new Date().toISOString(),
       });
     });
 
