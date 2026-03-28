@@ -27,7 +27,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       origin: "*",
       methods: ["GET", "POST"],
     },
-    path: "/socket.io",
+    path: "/api/socket.io",
   });
 
   io.on("connection", (socket) => {

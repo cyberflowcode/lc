@@ -12,8 +12,8 @@ export function useChat() {
   useEffect(() => {
     if (!token) return;
 
-    // Connect to same origin
-    const socket = io({ path: '/socket.io' });
+    // Connect to same origin — path must be under /api so the proxy routes it to the API server
+    const socket = io({ path: '/api/socket.io' });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -69,20 +69,12 @@ export function useChat() {
 
   const sendMessage = (content: string, type: 'text' | 'audio' = 'text', audioUrl?: string) => {
     if (!socketRef.current) return;
-    
-    const payload = {
-      content,
-      messageType: type,
-      audioUrl,
-      room: matchState === 'matched' ? useStore.getState().matchId : activeRoom
-    };
 
     if (matchState === 'matched') {
-      // Send as match message
-      socketRef.current.emit('chat-message', { ...payload, isMatch: true });
+      const matchId = useStore.getState().matchId;
+      socketRef.current.emit('match-message', { matchId, content, messageType: type, audioUrl });
     } else {
-      // Send as public room message
-      socketRef.current.emit('chat-message', payload);
+      socketRef.current.emit('chat-message', { room: activeRoom, content, messageType: type, audioUrl });
     }
   };
 
