@@ -190,8 +190,7 @@ export default function Dashboard() {
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed bottom-[57px] left-0 right-0 z-50 bg-card rounded-t-3xl border-t border-border shadow-2xl lg:hidden flex flex-col"
-            style={{ maxHeight: '72vh' }}
+            className="fixed bottom-[57px] left-0 right-0 z-50 bg-card rounded-t-3xl border-t border-border shadow-2xl lg:hidden flex flex-col h-[72vh]"
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
