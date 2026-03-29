@@ -15,6 +15,8 @@ tags:
     description: User operations
   - name: messages
     description: Message operations
+  - name: friends
+    description: Friend operations
 paths:
   /healthz:
     get:
@@ -169,6 +171,111 @@ paths:
                 items:
                   $ref: "#/components/schemas/Message"
 
+  /friends:
+    get:
+      operationId: getFriends
+      tags: [friends]
+      summary: Get my friends list
+      responses:
+        "200":
+          description: Friends list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Friendship"
+
+  /friends/requests:
+    get:
+      operationId: getFriendRequests
+      tags: [friends]
+      summary: Get incoming friend requests
+      responses:
+        "200":
+          description: Friend requests list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Friendship"
+
+  /friends/request/{username}:
+    post:
+      operationId: sendFriendRequest
+      tags: [friends]
+      summary: Send a friend request
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Request sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Friendship"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already friends or pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /friends/accept/{requestId}:
+    post:
+      operationId: acceptFriendRequest
+      tags: [friends]
+      summary: Accept a friend request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Friendship"
+        "404":
+          description: Request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /friends/{requestId}:
+    delete:
+      operationId: removeFriend
+      tags: [friends]
+      summary: Remove friend or decline request
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -279,6 +386,19 @@ components:
           type: ["string", "null"]
         messageType:
           type: string
+        replyToId:
+          type: ["integer", "null"]
+        editedAt:
+          type: ["string", "null"]
+          format: date-time
+        isDeleted:
+          type: boolean
+        reactions:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
         createdAt:
           type: string
           format: date-time
@@ -288,4 +408,26 @@ components:
         - username
         - avatar
         - messageType
+        - isDeleted
+        - createdAt
+
+    Friendship:
+      type: object
+      properties:
+        id:
+          type: integer
+        requester:
+          type: string
+        recipient:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - requester
+        - recipient
+        - status
         - createdAt

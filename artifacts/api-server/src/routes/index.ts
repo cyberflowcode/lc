@@ -4,6 +4,7 @@ import authRouter from "./auth.js";
 import messagesRouter from "./messages.js";
 import usersRouter from "./users.js";
 import uploadRouter from "./upload.js";
+import friendsRouter from "./friends.js";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(authRouter);
 router.use(messagesRouter);
 router.use(usersRouter);
 router.use(uploadRouter);
+router.use(friendsRouter);
 
 export default router;

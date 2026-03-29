@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User, Message } from '@workspace/api-client-react';
+import type { User, Message, Friendship } from '@workspace/api-client-react';
 
 export type MatchState = 'idle' | 'searching' | 'matched';
 
@@ -9,6 +9,13 @@ export interface OnlineUser {
   avatar: string;
   status: string;
   room: string;
+}
+
+export interface MessageWithReactions extends Message {
+  reactions: Record<string, string[]>;
+  replyToId?: number | null;
+  editedAt?: string | null;
+  isDeleted?: boolean;
 }
 
 interface AppState {
@@ -23,9 +30,9 @@ interface AppState {
   matchState: MatchState;
   matchId: string | null;
   matchPartner: Partial<User> | null;
-  matchMessages: Message[];
+  matchMessages: MessageWithReactions[];
   setMatchState: (state: MatchState, id?: string, partner?: Partial<User>) => void;
-  addMatchMessage: (msg: Message) => void;
+  addMatchMessage: (msg: MessageWithReactions) => void;
   clearMatch: () => void;
 
   roomUsers: Record<string, Partial<User>[]>;
@@ -34,6 +41,17 @@ interface AppState {
   allOnlineUsers: OnlineUser[];
   totalOnlineCount: number;
   setAllOnlineUsers: (users: OnlineUser[], count: number) => void;
+
+  friends: Friendship[];
+  friendRequests: Friendship[];
+  setFriends: (friends: Friendship[]) => void;
+  setFriendRequests: (requests: Friendship[]) => void;
+
+  replyTo: MessageWithReactions | null;
+  setReplyTo: (msg: MessageWithReactions | null) => void;
+
+  activeDm: string | null;
+  setActiveDm: (username: string | null) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -42,7 +60,7 @@ export const useStore = create<AppState>()(
       token: null,
       user: null,
       setAuth: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
+      logout: () => set({ token: null, user: null, activeRoom: 'Global', activeDm: null }),
 
       activeRoom: 'Global',
       setActiveRoom: (room) => set({ activeRoom: room }),
@@ -61,10 +79,25 @@ export const useStore = create<AppState>()(
       allOnlineUsers: [],
       totalOnlineCount: 0,
       setAllOnlineUsers: (users, count) => set({ allOnlineUsers: users, totalOnlineCount: count }),
+
+      friends: [],
+      friendRequests: [],
+      setFriends: (friends) => set({ friends }),
+      setFriendRequests: (requests) => set({ friendRequests: requests }),
+
+      replyTo: null,
+      setReplyTo: (msg) => set({ replyTo: msg }),
+
+      activeDm: null,
+      setActiveDm: (username) => set({ activeDm: username }),
     }),
     {
       name: 'litchat-storage',
-      partialize: (state) => ({ token: state.token, user: state.user }), // only persist auth
+      partialize: (state) => ({
+        token: state.token,
+        user: state.user,
+        activeRoom: state.activeRoom,
+      }),
     }
   )
 );

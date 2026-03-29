@@ -1,8 +1,8 @@
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HttpServer } from "http";
-import { verifyToken, extractToken } from "./auth.js";
-import { db, messagesTable, matchSessionsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { verifyToken } from "./auth.js";
+import { db, messagesTable, matchSessionsTable, messageReactionsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { logger } from "./logger.js";
 
 interface ConnectedUser {
@@ -20,14 +20,25 @@ interface MatchQueue {
 
 const connectedUsers = new Map<string, ConnectedUser>();
 const matchQueue: MatchQueue[] = [];
-const activeMatches = new Map<string, string>(); // socketId -> partner socketId
+const activeMatches = new Map<string, string>();
+
+async function buildMessageWithReactions(message: typeof messagesTable.$inferSelect) {
+  const reactions = await db
+    .select()
+    .from(messageReactionsTable)
+    .where(eq(messageReactionsTable.messageId, message.id));
+
+  const reactionsMap: Record<string, string[]> = {};
+  for (const r of reactions) {
+    if (!reactionsMap[r.emoji]) reactionsMap[r.emoji] = [];
+    reactionsMap[r.emoji].push(r.username);
+  }
+  return { ...message, reactions: reactionsMap };
+}
 
 export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-    },
+    cors: { origin: "*", methods: ["GET", "POST"] },
     path: "/api/socket.io",
   });
 
@@ -41,14 +52,12 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         return;
       }
 
-      // Leave previous room
       const existing = connectedUsers.get(socket.id);
       if (existing?.currentRoom) {
         socket.leave(existing.currentRoom);
         emitRoomUsers(io, existing.currentRoom);
       }
 
-      // Join new room
       socket.join(room);
       connectedUsers.set(socket.id, {
         socketId: socket.id,
@@ -72,15 +81,9 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       emitRoomUsers(io, room);
     });
 
-    socket.on("chat-message", async ({ room, content, messageType, audioUrl }: {
-      room: string;
-      content?: string;
-      messageType: string;
-      audioUrl?: string;
-    }) => {
+    socket.on("chat-message", async ({ room, content, messageType, audioUrl, replyToId }: any) => {
       const user = connectedUsers.get(socket.id);
       if (!user) return;
-
       if (messageType === "text" && (!content || !content.trim())) return;
 
       try {
@@ -91,20 +94,86 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           content: content || null,
           audioUrl: audioUrl || null,
           messageType,
+          replyToId: replyToId || null,
         }).returning();
 
-        io.to(room).emit("message", {
-          id: message.id,
-          room: message.room,
-          username: message.username,
-          avatar: message.avatar,
-          content: message.content,
-          audioUrl: message.audioUrl,
-          messageType: message.messageType,
-          createdAt: message.createdAt,
-        });
+        io.to(room).emit("message", { ...message, reactions: {} });
       } catch (err) {
         logger.error({ err }, "Error saving message");
+      }
+    });
+
+    socket.on("edit-message", async ({ messageId, content, room }: { messageId: number; content: string; room: string }) => {
+      const user = connectedUsers.get(socket.id);
+      if (!user || !content?.trim()) return;
+
+      try {
+        const [existing] = await db.select().from(messagesTable).where(eq(messagesTable.id, messageId));
+        if (!existing || existing.username !== user.username) return;
+
+        const [updated] = await db
+          .update(messagesTable)
+          .set({ content: content.trim(), editedAt: new Date() })
+          .where(eq(messagesTable.id, messageId))
+          .returning();
+
+        const withReactions = await buildMessageWithReactions(updated);
+        io.to(room).emit("message-updated", withReactions);
+      } catch (err) {
+        logger.error({ err }, "Error editing message");
+      }
+    });
+
+    socket.on("delete-message", async ({ messageId, room }: { messageId: number; room: string }) => {
+      const user = connectedUsers.get(socket.id);
+      if (!user) return;
+
+      try {
+        const [existing] = await db.select().from(messagesTable).where(eq(messagesTable.id, messageId));
+        if (!existing || existing.username !== user.username) return;
+
+        const [updated] = await db
+          .update(messagesTable)
+          .set({ isDeleted: true, content: null })
+          .where(eq(messagesTable.id, messageId))
+          .returning();
+
+        const withReactions = await buildMessageWithReactions(updated);
+        io.to(room).emit("message-updated", withReactions);
+      } catch (err) {
+        logger.error({ err }, "Error deleting message");
+      }
+    });
+
+    socket.on("react-message", async ({ messageId, emoji, room }: { messageId: number; emoji: string; room: string }) => {
+      const user = connectedUsers.get(socket.id);
+      if (!user) return;
+
+      try {
+        const existing = await db
+          .select()
+          .from(messageReactionsTable)
+          .where(
+            and(
+              eq(messageReactionsTable.messageId, messageId),
+              eq(messageReactionsTable.username, user.username),
+              eq(messageReactionsTable.emoji, emoji),
+            ),
+          );
+
+        if (existing.length > 0) {
+          await db.delete(messageReactionsTable).where(eq(messageReactionsTable.id, existing[0].id));
+        } else {
+          await db.insert(messageReactionsTable).values({ messageId, username: user.username, emoji });
+        }
+
+        const [msg] = await db.select().from(messagesTable).where(eq(messagesTable.id, messageId));
+        if (!msg) return;
+
+        const withReactions = await buildMessageWithReactions(msg);
+        io.to(room).emit("message-updated", withReactions);
+      } catch (err) {
+        logger.error({ err }, "Error reacting to message");
       }
     });
 
@@ -115,11 +184,9 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         return;
       }
 
-      // Remove from any existing queue
       const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
       if (queueIdx !== -1) matchQueue.splice(queueIdx, 1);
 
-      // Find an available partner (not self, not already matched)
       const partnerIdx = matchQueue.findIndex((q) => q.socketId !== socket.id && !activeMatches.has(q.socketId));
 
       if (partnerIdx !== -1) {
@@ -132,45 +199,23 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         socket.join(matchId);
         io.sockets.sockets.get(partner.socketId)?.join(matchId);
 
-        // Persist session to DB
         db.insert(matchSessionsTable).values({
           matchId,
           user1: payload.username,
           user2: partner.username,
         }).catch(err => logger.error({ err }, "Failed to save match session"));
 
-        socket.emit("match-found", {
-          matchId,
-          partner: { username: partner.username, avatar: partner.avatar },
-        });
-
-        io.to(partner.socketId).emit("match-found", {
-          matchId,
-          partner: { username: payload.username, avatar: payload.avatar },
-        });
-
-        logger.info({ matchId, user1: payload.username, user2: partner.username }, "Match found");
+        socket.emit("match-found", { matchId, partner: { username: partner.username, avatar: partner.avatar } });
+        io.to(partner.socketId).emit("match-found", { matchId, partner: { username: payload.username, avatar: payload.avatar } });
       } else {
-        matchQueue.push({
-          socketId: socket.id,
-          username: payload.username,
-          avatar: payload.avatar,
-        });
+        matchQueue.push({ socketId: socket.id, username: payload.username, avatar: payload.avatar });
         socket.emit("waiting-for-match", { message: "Searching for a match..." });
-        logger.info({ username: payload.username }, "Added to match queue");
       }
     });
 
-    socket.on("match-message", async ({ matchId, content, messageType, audioUrl }: {
-      matchId: string;
-      content?: string;
-      messageType: string;
-      audioUrl?: string;
-    }) => {
+    socket.on("match-message", async ({ matchId, content, messageType, audioUrl }: any) => {
       const user = connectedUsers.get(socket.id);
       if (!user) return;
-      if (messageType === "text" && (!content || !content.trim())) return;
-
       try {
         const [saved] = await db.insert(messagesTable).values({
           room: matchId,
@@ -180,17 +225,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           audioUrl: audioUrl ?? null,
           messageType,
         }).returning();
-
-        io.to(matchId).emit("match-message", {
-          id: saved.id,
-          room: saved.room,
-          username: saved.username,
-          avatar: saved.avatar,
-          content: saved.content,
-          audioUrl: saved.audioUrl,
-          messageType: saved.messageType,
-          createdAt: saved.createdAt,
-        });
+        io.to(matchId).emit("match-message", { ...saved, reactions: {} });
       } catch (err) {
         logger.error({ err }, "Failed to save match message");
       }
@@ -203,15 +238,9 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         activeMatches.delete(partnerId);
       }
       activeMatches.delete(socket.id);
-
-      // Remove from queue too
-      const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
-      if (queueIdx !== -1) matchQueue.splice(queueIdx, 1);
     });
 
     socket.on("disconnect", () => {
-      logger.info({ socketId: socket.id }, "Socket disconnected");
-
       const user = connectedUsers.get(socket.id);
       const partnerId = activeMatches.get(socket.id);
       if (partnerId) {
@@ -219,13 +248,9 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         activeMatches.delete(partnerId);
       }
       activeMatches.delete(socket.id);
-
       const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
       if (queueIdx !== -1) matchQueue.splice(queueIdx, 1);
-
-      if (user?.currentRoom) {
-        emitRoomUsers(io, user.currentRoom);
-      }
+      if (user?.currentRoom) emitRoomUsers(io, user.currentRoom);
       connectedUsers.delete(socket.id);
       emitAllUsers(io);
     });
@@ -235,29 +260,14 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
 }
 
 function emitRoomUsers(io: SocketIOServer, room: string): void {
-  const users: { username: string; avatar: string; status: string }[] = [];
-  for (const [, user] of connectedUsers) {
-    if (user.currentRoom === room) {
-      users.push({ username: user.username, avatar: user.avatar, status: "online" });
-    }
-  }
+  const users = Array.from(connectedUsers.values())
+    .filter(u => u.currentRoom === room)
+    .map(u => ({ username: u.username, avatar: u.avatar, status: "online" }));
   io.to(room).emit("room-users", { room, users });
 }
 
 function emitAllUsers(io: SocketIOServer): void {
-  // Deduplicate by username (a user might have multiple tabs open)
-  const seen = new Set<string>();
-  const users: { username: string; avatar: string; status: string; room: string }[] = [];
-  for (const [, user] of connectedUsers) {
-    if (!seen.has(user.username)) {
-      seen.add(user.username);
-      users.push({
-        username: user.username,
-        avatar: user.avatar,
-        status: "online",
-        room: user.currentRoom || "",
-      });
-    }
-  }
+  const users = Array.from(new Map(Array.from(connectedUsers.values()).map(u => [u.username, u])).values())
+    .map(u => ({ username: u.username, avatar: u.avatar, status: "online", room: u.currentRoom || "" }));
   io.emit("all-users", { users, count: users.length });
 }

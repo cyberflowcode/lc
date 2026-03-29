@@ -109,6 +109,69 @@ export const GetRoomMessagesResponseItem = zod.object({
   content: zod.string().nullish(),
   audioUrl: zod.string().nullish(),
   messageType: zod.string(),
+  replyToId: zod.number().nullish(),
+  editedAt: zod.coerce.date().nullish(),
+  isDeleted: zod.boolean(),
+  reactions: zod.record(zod.string(), zod.array(zod.string())).optional(),
   createdAt: zod.coerce.date(),
 });
 export const GetRoomMessagesResponse = zod.array(GetRoomMessagesResponseItem);
+
+/**
+ * @summary Get my friends list
+ */
+export const GetFriendsResponseItem = zod.object({
+  id: zod.number(),
+  requester: zod.string(),
+  recipient: zod.string(),
+  status: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+export const GetFriendsResponse = zod.array(GetFriendsResponseItem);
+
+/**
+ * @summary Get incoming friend requests
+ */
+export const GetFriendRequestsResponseItem = zod.object({
+  id: zod.number(),
+  requester: zod.string(),
+  recipient: zod.string(),
+  status: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+export const GetFriendRequestsResponse = zod.array(
+  GetFriendRequestsResponseItem,
+);
+
+/**
+ * @summary Send a friend request
+ */
+export const SendFriendRequestParams = zod.object({
+  username: zod.coerce.string(),
+});
+
+/**
+ * @summary Accept a friend request
+ */
+export const AcceptFriendRequestParams = zod.object({
+  requestId: zod.coerce.number(),
+});
+
+export const AcceptFriendRequestResponse = zod.object({
+  id: zod.number(),
+  requester: zod.string(),
+  recipient: zod.string(),
+  status: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Remove friend or decline request
+ */
+export const RemoveFriendParams = zod.object({
+  requestId: zod.coerce.number(),
+});
+
+export const RemoveFriendResponse = zod.object({
+  success: zod.boolean(),
+});

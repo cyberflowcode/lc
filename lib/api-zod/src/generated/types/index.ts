@@ -8,10 +8,12 @@
 
 export * from "./authResponse";
 export * from "./errorResponse";
+export * from "./friendship";
 export * from "./getRoomMessagesParams";
 export * from "./healthStatus";
 export * from "./loginBody";
 export * from "./message";
+export * from "./messageReactions";
 export * from "./registerBody";
 export * from "./successResponse";
 export * from "./updateAvatarBody";

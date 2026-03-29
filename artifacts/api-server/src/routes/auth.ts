@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { signToken } from "../lib/auth.js";

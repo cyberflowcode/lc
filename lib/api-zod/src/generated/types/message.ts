@@ -5,6 +5,7 @@
  * LitChat API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MessageReactions } from "./messageReactions";
 
 export interface Message {
   id: number;
@@ -16,5 +17,11 @@ export interface Message {
   /** @nullable */
   audioUrl?: string | null;
   messageType: string;
+  /** @nullable */
+  replyToId?: number | null;
+  /** @nullable */
+  editedAt?: Date | null;
+  isDeleted: boolean;
+  reactions?: MessageReactions;
   createdAt: Date;
 }

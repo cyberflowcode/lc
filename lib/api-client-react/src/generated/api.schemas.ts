@@ -50,6 +50,8 @@ export interface AuthResponse {
   token: string;
 }
 
+export type MessageReactions = { [key: string]: string[] };
+
 export interface Message {
   id: number;
   room: string;
@@ -60,6 +62,20 @@ export interface Message {
   /** @nullable */
   audioUrl?: string | null;
   messageType: string;
+  /** @nullable */
+  replyToId?: number | null;
+  /** @nullable */
+  editedAt?: string | null;
+  isDeleted: boolean;
+  reactions?: MessageReactions;
+  createdAt: string;
+}
+
+export interface Friendship {
+  id: number;
+  requester: string;
+  recipient: string;
+  status: string;
   createdAt: string;
 }
 

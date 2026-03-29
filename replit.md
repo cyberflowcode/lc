@@ -16,7 +16,7 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (ESM bundle)
 - **Real-time**: Socket.io
-- **Auth**: bcrypt + jsonwebtoken (JWT)
+- **Auth**: bcryptjs + jsonwebtoken (JWT) — uses bcryptjs (pure JS, VM compatible)
 - **File uploads**: multer (audio voice messages)
 
 ## Application — LitChat
@@ -24,11 +24,19 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 A full-stack real-time chat app inspired by Litmatch.
 
 ### Features
-- **Authentication**: Register/Login with bcrypt-hashed passwords, JWT tokens, emoji avatar selection
+- **Authentication**: Register/Login with bcryptjs-hashed passwords, JWT tokens, emoji avatar selection
 - **Chat Rooms**: 6 rooms — Global, Room1-5. Real-time messages via Socket.io.
+- **Room Persistence**: Active room is saved in localStorage, persists across refreshes
 - **Random Match**: "Start Random Match" button finds another online user and opens a private chat
 - **Voice Messages**: Record or upload audio, displayed as audio player in chat
-- **Discord-like UI**: Left sidebar (rooms), center (messages), right sidebar (online users)
+- **Discord-like UI**: Left sidebar (rooms + friends tabs), center (messages), right sidebar (online users with DM button)
+- **Message Actions** (hover over any message):
+  - **React**: Quick emoji reactions (👍❤️😂😮😢🔥👏🎉), toggle per-user
+  - **Reply**: Reply to any message with preview indicator
+  - **Edit**: Edit your own text messages inline
+  - **Delete**: Soft-delete your own messages (shows "Message deleted")
+- **Friends System**: Add friends by username, accept/decline requests, see friend list in sidebar
+- **Direct Messages (DM)**: Click message icon on any friend/online user to open private DM chat
 - **Message Bubbles**: Current user's messages on right, others on left
 
 ### Routes
@@ -41,40 +49,40 @@ A full-stack real-time chat app inspired by Litmatch.
 - `POST /api/auth/login` — Login
 - `POST /api/auth/logout` — Logout
 - `GET /api/auth/me` — Get current user (Bearer token)
-- `GET /api/messages/:room` — Fetch room message history
+- `GET /api/messages/:room` — Fetch room message history (includes reactions)
 - `POST /api/upload/audio` — Upload audio file
 - `PATCH /api/users/:username/avatar` — Update avatar
+- `GET /api/friends` — List accepted friends (authenticated)
+- `GET /api/friends/requests` — List incoming friend requests (authenticated)
+- `POST /api/friends/request/:username` — Send friend request (authenticated)
+- `POST /api/friends/accept/:requestId` — Accept friend request (authenticated)
+- `DELETE /api/friends/:requestId` — Remove friend / decline request (authenticated)
 
 ### Socket.io Events
-- `join-room` / `leave-room` / `chat-message` — Room-based chat
+- `join-room` / `leave-room` / `chat-message` (with optional replyToId) — Room-based chat
+- `edit-message` / `delete-message` / `react-message` — Message actions
+- `message-updated` — Emitted when a message is edited, deleted, or reacted to
 - `start-match` / `exit-match` — Random match system
 - `match-message` — Private match messaging
 
-## Structure
+## Database Schema (lib/db/src/schema/)
+- **users** — id, username, passwordHash, avatar, status, createdAt
+- **messages** — id, room, username, avatar, content, audioUrl, messageType, replyToId, editedAt, isDeleted, createdAt
+- **match_sessions** — id, matchId, user1, user2, startedAt, endedAt
+- **friendships** — id, requester, recipient, status (pending/accepted), createdAt
+- **message_reactions** — id, messageId, username, emoji, createdAt
 
-```text
-artifacts-monorepo/
-├── artifacts/
-│   ├── api-server/         # Express + Socket.io backend
-│   │   ├── src/lib/auth.ts            # JWT helpers
-│   │   ├── src/lib/socketHandler.ts   # Socket.io logic
-│   │   ├── src/middlewares/authenticate.ts
-│   │   └── src/routes/ (auth, messages, users, upload)
-│   ├── chat-app/           # React + Vite frontend (LitChat)
-│   └── mockup-sandbox/
-├── lib/
-│   ├── api-spec/           # OpenAPI spec + Orval codegen config
-│   ├── api-client-react/   # Generated React Query hooks
-│   ├── api-zod/            # Generated Zod schemas from OpenAPI
-│   └── db/
-│       └── src/schema/
-│           ├── users.ts    # Users table
-│           └── messages.ts # Messages table
-```
+## DM System
+- DM rooms use a special room name: `dm:${sortedUsername1}:${sortedUsername2}`
+- Messages are stored in the regular messages table with this room key
+- Initiated by clicking message icon on any online user or friend
+
+## Workflows
+- `Start Backend`: `PORT=8080 pnpm --filter @workspace/api-server run dev`
+- `Start application`: `PORT=18228 BASE_PATH=/ pnpm --filter @workspace/chat-app run dev`
 
 ## Running
-
-- API server: `pnpm --filter @workspace/api-server run dev`
-- Chat frontend: `pnpm --filter @workspace/chat-app run dev`
+- API server: `PORT=8080 pnpm --filter @workspace/api-server run dev`
+- Chat frontend: `PORT=18228 BASE_PATH=/ pnpm --filter @workspace/chat-app run dev`
 - DB push: `pnpm --filter @workspace/db run push`
 - Codegen: `pnpm --filter @workspace/api-spec run codegen`
