@@ -230,11 +230,11 @@ export default function Dashboard() {
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Online now</span>
                 <span className="ml-auto text-xs font-bold text-green-400">{totalOnlineCount}</span>
               </div>
-              <div className="max-h-36 overflow-y-auto space-y-2">
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
                 {allOnlineUsers.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-2">No one online yet</p>
                 ) : (
-                  allOnlineUsers.slice(0, 10).map((u, i) => (
+                  allOnlineUsers.map((u, i) => (
                     <div key={`${u.username}-${i}`} className="flex items-center gap-2">
                       <div className="relative flex-shrink-0">
                         <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-sm border border-white/5">
