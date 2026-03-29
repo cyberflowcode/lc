@@ -143,7 +143,7 @@ export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
                     💬
                   </div>
                   <span className="flex-1 text-sm font-medium text-white/90 truncate">{name}</span>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onDmUser(name)}
                       className="p-1.5 rounded-lg hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"

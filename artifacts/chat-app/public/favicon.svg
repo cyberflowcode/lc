@@ -1,3 +1,36 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <!-- Background -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0b0f"></stop>
+      <stop offset="100%" stop-color="#111827"></stop>
+    </linearGradient>
+
+    <!-- Purple glow -->
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a855f7"></stop>
+      <stop offset="100%" stop-color="#7c3aed"></stop>
+    </linearGradient>
+
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="blur"></feGaussianBlur>
+      <feMerge>
+        <feMergeNode in="blur"></feMergeNode>
+        <feMergeNode in="SourceGraphic"></feMergeNode>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base -->
+  <rect width="64" height="64" rx="16" fill="url(#bg)"></rect>
+
+  <!-- Chat bubble -->
+  <path d="M18 22c0-4 3-6 6-6h16c3 0 6 2 6 6v10c0 4-3 6-6 6H30l-6 5v-5h-2c-3 0-6-2-6-6V22z" fill="url(#purple)" filter="url(#glow)"></path>
+
+  <!-- Neon typing dots -->
+  <circle cx="26" cy="28" r="2" fill="#e9d5ff"></circle>
+  <circle cx="32" cy="28" r="2" fill="#d8b4fe"></circle>
+  <circle cx="38" cy="28" r="2" fill="#c084fc"></circle>
+
 </svg>

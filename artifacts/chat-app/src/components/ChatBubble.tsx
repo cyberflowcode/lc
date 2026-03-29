@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { AudioPlayer } from './AudioPlayer';
@@ -25,6 +25,34 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
   const editInputRef = useRef<HTMLInputElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!showActions && !showEmojiPicker) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) {
+        setShowActions(false);
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [showActions, showEmojiPicker]);
+
+  const handleTouchStart = () => {
+    longPressTimer.current = setTimeout(() => {
+      setShowActions(true);
+    }, 450);
+  };
+
+  const handleTouchEnd = () => {
+    clearTimeout(longPressTimer.current);
+  };
 
   const handleEditSubmit = () => {
     if (!editContent.trim() || !onEdit) return;
@@ -38,12 +66,10 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
     setShowActions(false);
   };
 
-  const myReactions = Object.entries(message.reactions || {}).filter(([, users]) => users.includes(currentUser?.username || ''));
-
   if (message.isDeleted) {
     return (
       <div className={cn("flex w-full gap-3 max-w-[85%]", isMe ? "ml-auto flex-row-reverse" : "")}>
-        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-xl opacity-40">
+        <div className="flex-shrink-0 w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-lg lg:text-xl opacity-40">
           {message.avatar}
         </div>
         <div className={cn("flex flex-col gap-1", isMe ? "items-end" : "items-start")}>
@@ -61,14 +87,20 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
 
   return (
     <motion.div
+      ref={bubbleRef}
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      className={cn("flex w-full gap-3 max-w-[85%] group relative", isMe ? "ml-auto flex-row-reverse" : "")}
+      className={cn("flex w-full gap-2 lg:gap-3 max-w-[88%] lg:max-w-[85%] group relative", isMe ? "ml-auto flex-row-reverse" : "")}
       onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => { setShowActions(false); setShowEmojiPicker(false); }}
+      onMouseLeave={() => {
+        if (!showEmojiPicker) setShowActions(false);
+      }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchEnd}
     >
       {/* Avatar */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-xl shadow-sm">
+      <div className="flex-shrink-0 w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-lg lg:text-xl shadow-sm">
         {message.avatar}
       </div>
 
@@ -85,7 +117,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
         {/* Reply source preview */}
         {replySource && (
           <div className={cn(
-            "px-3 py-1.5 rounded-xl text-xs border-l-2 border-primary/50 bg-white/5 mb-0.5 max-w-xs truncate",
+            "px-3 py-1.5 rounded-xl text-xs border-l-2 border-primary/50 bg-white/5 mb-0.5 max-w-[220px] lg:max-w-xs truncate",
             isMe ? "mr-1" : "ml-1"
           )}>
             <span className="text-primary/80 font-semibold mr-1">{replySource.username}:</span>
@@ -95,7 +127,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
 
         {/* Message bubble */}
         <div className={cn(
-          "px-4 py-2.5 rounded-2xl shadow-sm relative",
+          "px-3 lg:px-4 py-2 lg:py-2.5 rounded-2xl shadow-sm relative",
           isMe
             ? "bg-primary text-primary-foreground rounded-tr-sm"
             : "bg-secondary text-secondary-foreground rounded-tl-sm border border-white/5"
@@ -126,7 +158,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
             message.messageType === 'audio' && message.audioUrl ? (
               <AudioPlayer src={message.audioUrl} className={isMe ? "bg-black/20" : ""} />
             ) : (
-              <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
+              <p className="text-[14px] lg:text-[15px] leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
             )
           )}
         </div>
@@ -161,14 +193,14 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             className={cn(
-              "absolute top-8 flex items-center gap-0.5 bg-card border border-border rounded-xl shadow-xl px-1 py-1 z-20",
-              isMe ? "right-[52px]" : "left-[52px]"
+              "absolute top-7 lg:top-8 flex items-center gap-0.5 bg-card border border-border rounded-xl shadow-xl px-1 py-1 z-20",
+              isMe ? "right-[44px] lg:right-[52px]" : "left-[44px] lg:left-[52px]"
             )}
           >
             {/* React */}
             <div className="relative">
               <button
-                onClick={() => setShowEmojiPicker(p => !p)}
+                onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(p => !p); }}
                 className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
                 title="React"
               >
@@ -180,6 +212,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 4 }}
+                    onClick={e => e.stopPropagation()}
                     className={cn(
                       "absolute top-full mt-1 flex gap-1 bg-card border border-border rounded-xl p-2 shadow-xl z-30",
                       isMe ? "right-0" : "left-0"
