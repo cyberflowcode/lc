@@ -1,7 +1,7 @@
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HttpServer } from "http";
 import { verifyToken } from "./auth.js";
-import { db, messagesTable, matchSessionsTable, messageReactionsTable } from "@workspace/db";
+import { db, messagesTable, matchSessionsTable, messageReactionsTable, roomsTable, roomMembersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "./logger.js";
 
@@ -50,6 +50,27 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       if (!payload) {
         socket.emit("error", { message: "Invalid token" });
         return;
+      }
+
+      // For user-created rooms (room:ID format), check membership
+      if (room.startsWith("room:")) {
+        const roomId = parseInt(room.split(":")[1]);
+        if (!isNaN(roomId)) {
+          try {
+            const [roomData] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
+            if (roomData?.isPrivate) {
+              const [membership] = await db.select().from(roomMembersTable).where(
+                and(eq(roomMembersTable.roomId, roomId), eq(roomMembersTable.username, payload.username), eq(roomMembersTable.status, "accepted"))
+              );
+              if (!membership) {
+                socket.emit("room-access-denied", { room, message: "This is a private room. Request to join first." });
+                return;
+              }
+            }
+          } catch (err) {
+            logger.error({ err }, "Error checking room membership");
+          }
+        }
       }
 
       const existing = connectedUsers.get(socket.id);

@@ -3,3 +3,4 @@ export * from "./messages";
 export * from "./matchSessions";
 export * from "./friendships";
 export * from "./messageReactions";
+export * from "./rooms";

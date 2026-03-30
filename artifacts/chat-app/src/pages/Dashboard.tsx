@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useLocation } from 'wouter';
 import { useStore, type MessageWithReactions } from '@/store';
 import { useGetMe, useGetRoomMessages } from '@workspace/api-client-react';
@@ -7,16 +7,30 @@ import { useAudioRecorder } from '@/hooks/use-audio-recorder';
 import { ChatBubble } from '@/components/ChatBubble';
 import { MatchOverlay } from '@/components/MatchOverlay';
 import { FriendsPanel } from '@/components/FriendsPanel';
+import { CreateRoomModal } from '@/components/CreateRoomModal';
 import {
   LogOut, Hash, Send, Mic, Square, Loader2,
   Users, Zap, ChevronLeft, Globe, Gamepad2, X,
-  MessageCircle, UserPlus, ArrowLeft,
+  MessageCircle, UserPlus, ArrowLeft, Lock, Plus, Bell, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const ROOMS = ['Global', 'Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5'];
+
+interface RoomItem {
+  id: number;
+  name: string;
+  description?: string | null;
+  createdBy: string;
+  isPrivate: boolean;
+  memberCount: number;
+  pendingCount: number;
+  isMember: boolean;
+  isOwner: boolean;
+  roomKey: string;
+}
 
 type MobilePanel = 'rooms' | 'friends' | 'people' | null;
 
@@ -38,8 +52,79 @@ export default function Dashboard() {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const [createRoomOpen, setCreateRoomOpen] = useState(false);
+  const [userRooms, setUserRooms] = useState<RoomItem[]>([]);
+  const [joiningRoomId, setJoiningRoomId] = useState<number | null>(null);
+  const [requestsRoomId, setRequestsRoomId] = useState<number | null>(null);
+  const [pendingMembers, setPendingMembers] = useState<any[]>([]);
 
   useEffect(() => { if (!token) setLocation('/login'); }, [token, setLocation]);
+
+  const fetchRooms = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/rooms', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setUserRooms(await res.json());
+    } catch {}
+  }, [token]);
+
+  useEffect(() => { fetchRooms(); }, [fetchRooms]);
+
+  useEffect(() => {
+    const handler = (e: Event) => toast({ variant: 'destructive', description: (e as CustomEvent).detail });
+    window.addEventListener('room-access-denied', handler);
+    return () => window.removeEventListener('room-access-denied', handler);
+  }, [toast]);
+
+  const openRequests = async (room: RoomItem) => {
+    setRequestsRoomId(room.id);
+    try {
+      const res = await fetch(`/api/rooms/${room.id}/members`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const members = await res.json();
+        setPendingMembers(members.filter((m: any) => m.status === 'pending'));
+      }
+    } catch {}
+  };
+
+  const handleAcceptMember = async (roomId: number, username: string) => {
+    await fetch(`/api/rooms/${roomId}/accept/${username}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    setPendingMembers(prev => prev.filter(m => m.username !== username));
+    fetchRooms();
+    toast({ description: `${username} accepted!` });
+  };
+
+  const handleDeclineMember = async (roomId: number, username: string) => {
+    await fetch(`/api/rooms/${roomId}/members/${username}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    setPendingMembers(prev => prev.filter(m => m.username !== username));
+    fetchRooms();
+  };
+
+  const handleJoinRoom = async (room: RoomItem) => {
+    if (room.isMember) {
+      handleRoomSelect(room.roomKey);
+      return;
+    }
+    setJoiningRoomId(room.id);
+    try {
+      const res = await fetch(`/api/rooms/${room.id}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ description: data.message });
+        fetchRooms();
+        if (!room.isPrivate) handleRoomSelect(room.roomKey);
+      } else {
+        toast({ variant: 'destructive', description: data.error });
+      }
+    } catch {
+      toast({ variant: 'destructive', description: 'Failed to join room' });
+    } finally {
+      setJoiningRoomId(null);
+    }
+  };
 
   useGetMe({
     request: { headers: { Authorization: `Bearer ${token}` } },
@@ -156,16 +241,63 @@ export default function Dashboard() {
   if (!token || !user) return <div className="min-h-screen bg-background" />;
 
   const dmOtherUser = isDm ? activeRoom.replace('dm:', '').split(':').find(n => n !== user.username) : null;
+  const isUserRoom = activeRoom.startsWith('room:');
+  const activeUserRoom = isUserRoom ? userRooms.find(r => r.roomKey === activeRoom) : null;
 
   const roomHeader = isDm
     ? <><ArrowLeft size={16} className="text-primary" /><span className="text-white">DM: {dmOtherUser}</span></>
-    : activeRoom === 'Global'
-      ? <><Globe size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>
-      : <><Hash size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>;
+    : isUserRoom
+      ? <>{activeUserRoom?.isPrivate ? <Lock size={16} className="text-primary" /> : <Hash size={16} className="text-primary" />}<span className="text-white">{activeUserRoom?.name || activeRoom}</span></>
+      : activeRoom === 'Global'
+        ? <><Globe size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>
+        : <><Hash size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>;
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background overflow-hidden text-foreground">
       <MatchOverlay />
+      <CreateRoomModal open={createRoomOpen} onClose={() => setCreateRoomOpen(false)} onCreated={r => setUserRooms(prev => [...prev, r])} />
+
+      {/* Join requests modal */}
+      <AnimatePresence>
+        {requestsRoomId !== null && (
+          <>
+            <motion.div key="req-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
+              onClick={() => setRequestsRoomId(null)} />
+            <motion.div key="req-modal" initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+              <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl pointer-events-auto">
+                <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
+                  <h2 className="font-bold text-white text-lg">Join Requests</h2>
+                  <button onClick={() => setRequestsRoomId(null)} className="p-1.5 text-muted-foreground hover:text-white rounded-lg hover:bg-white/5">
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="px-5 py-4 space-y-2 max-h-80 overflow-y-auto">
+                  {pendingMembers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">No pending requests</p>
+                  ) : pendingMembers.map(m => (
+                    <div key={m.username} className="flex items-center gap-3 py-2">
+                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
+                        {m.username[0].toUpperCase()}
+                      </div>
+                      <span className="text-sm text-white flex-1 font-medium">{m.username}</span>
+                      <button onClick={() => handleDeclineMember(requestsRoomId, m.username)}
+                        className="px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
+                        Decline
+                      </button>
+                      <button onClick={() => handleAcceptMember(requestsRoomId, m.username)}
+                        className="px-2.5 py-1 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors">
+                        Accept
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* ── MOBILE PANEL BACKDROP ── */}
       <AnimatePresence>
@@ -234,6 +366,42 @@ export default function Dashboard() {
                       <div className="w-2 h-2 rounded-full bg-primary" />
                     </div>
                   )}
+
+                  {/* User-created rooms section */}
+                  <div className="pt-3 mt-1 border-t border-border">
+                    <div className="flex items-center justify-between px-1 mb-2">
+                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">My Rooms</span>
+                      <button onClick={() => { setMobilePanel(null); setCreateRoomOpen(true); }}
+                        className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors">
+                        <Plus size={13} />
+                      </button>
+                    </div>
+                    {userRooms.length === 0 ? (
+                      <button onClick={() => { setMobilePanel(null); setCreateRoomOpen(true); }}
+                        className="w-full text-xs text-muted-foreground text-center py-3 rounded-2xl hover:bg-white/5 transition-colors">
+                        + Create your first room
+                      </button>
+                    ) : userRooms.map(room => (
+                      <div key={room.id} className={cn(
+                        'w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium transition-all group',
+                        activeRoom === room.roomKey ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white',
+                      )}>
+                        <button className="flex items-center gap-3 flex-1 min-w-0 text-left" onClick={() => handleJoinRoom(room)}>
+                          {room.isPrivate ? <Lock size={16} className="flex-shrink-0" /> : <Hash size={16} className="flex-shrink-0" />}
+                          <span className="flex-1 truncate">{room.name}</span>
+                          {joiningRoomId === room.id && <Loader2 size={14} className="animate-spin flex-shrink-0" />}
+                          {!room.isMember && room.isPrivate && <Clock size={13} className="text-yellow-500 flex-shrink-0" />}
+                          {activeRoom === room.roomKey && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                        </button>
+                        {room.isOwner && room.pendingCount > 0 && (
+                          <button onClick={() => { setMobilePanel(null); openRequests(room); }}
+                            className="flex-shrink-0 w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 text-[10px] font-bold flex items-center justify-center">
+                            {room.pendingCount}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="px-3 pt-2 pb-4 flex-shrink-0">
                   <button
@@ -371,6 +539,56 @@ export default function Dashboard() {
                     <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
                   </div>
                 )}
+
+                {/* User-created rooms */}
+                <div className="pt-4 mt-2 border-t border-border">
+                  <div className="flex items-center justify-between mb-2 ml-1">
+                    <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">My Rooms</h3>
+                    <button
+                      onClick={() => setCreateRoomOpen(true)}
+                      className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors"
+                      title="Create room"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  {userRooms.length === 0 ? (
+                    <button
+                      onClick={() => setCreateRoomOpen(true)}
+                      className="w-full text-xs text-muted-foreground hover:text-white text-center py-3 rounded-xl hover:bg-white/5 transition-colors"
+                    >
+                      + Create your first room
+                    </button>
+                  ) : userRooms.map(room => (
+                    <div key={room.id} className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group',
+                      activeRoom === room.roomKey
+                        ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
+                        : 'text-muted-foreground hover:bg-white/5 hover:text-white',
+                    )}>
+                      <button className="flex items-center gap-2.5 flex-1 min-w-0 text-left" onClick={() => handleJoinRoom(room)}>
+                        {room.isPrivate ? <Lock size={15} className="flex-shrink-0" /> : <Hash size={15} className="flex-shrink-0" />}
+                        <span className="truncate flex-1">{room.name}</span>
+                        {!room.isMember && (
+                          room.isPrivate
+                            ? <Clock size={12} className="flex-shrink-0 text-yellow-500" title="Request to join" />
+                            : <Plus size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100" />
+                        )}
+                        {joiningRoomId === room.id && <Loader2 size={12} className="animate-spin flex-shrink-0" />}
+                      </button>
+                      {room.isOwner && room.pendingCount > 0 && (
+                        <button
+                          onClick={() => openRequests(room)}
+                          className="flex-shrink-0 w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold hover:bg-yellow-500/30 transition-colors"
+                          title={`${room.pendingCount} join request(s)`}
+                        >
+                          {room.pendingCount}
+                        </button>
+                      )}
+                      {activeRoom === room.roomKey && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="p-4 border-t border-border bg-black/20 flex-shrink-0">
                 <button
@@ -453,6 +671,7 @@ export default function Dashboard() {
 
                   <div className="p-1.5 lg:p-2 bg-secondary rounded-lg flex-shrink-0">
                     {isDm ? <MessageCircle size={18} className="text-primary" />
+                      : isUserRoom ? (activeUserRoom?.isPrivate ? <Lock size={18} className="text-primary" /> : <Hash size={18} className="text-primary" />)
                       : activeRoom === 'Global' ? <Globe size={18} className="text-primary" />
                         : <Hash size={18} className="text-primary" />}
                   </div>
@@ -585,11 +804,13 @@ export default function Dashboard() {
                 <div className="flex-1 flex items-center gap-1.5 px-3 py-2.5 min-w-0">
                   {isDm
                     ? <MessageCircle size={14} className="text-primary flex-shrink-0" />
-                    : activeRoom === 'Global'
-                      ? <Globe size={14} className="text-primary flex-shrink-0" />
-                      : <Hash size={14} className="text-primary flex-shrink-0" />}
+                    : isUserRoom
+                      ? (activeUserRoom?.isPrivate ? <Lock size={14} className="text-primary flex-shrink-0" /> : <Hash size={14} className="text-primary flex-shrink-0" />)
+                      : activeRoom === 'Global'
+                        ? <Globe size={14} className="text-primary flex-shrink-0" />
+                        : <Hash size={14} className="text-primary flex-shrink-0" />}
                   <span className="text-xs font-semibold text-white truncate">
-                    {isDm ? `DM: ${dmOtherUser}` : activeRoom}
+                    {isDm ? `DM: ${dmOtherUser}` : isUserRoom ? (activeUserRoom?.name || activeRoom) : activeRoom}
                   </span>
                 </div>
 

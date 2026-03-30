@@ -77,6 +77,10 @@ export function useChat() {
       clearMatch();
     });
 
+    socket.on('room-access-denied', ({ message }: { message: string }) => {
+      window.dispatchEvent(new CustomEvent('room-access-denied', { detail: message }));
+    });
+
     return () => {
       socket.disconnect();
     };
