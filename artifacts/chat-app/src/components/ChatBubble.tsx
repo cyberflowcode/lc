@@ -128,7 +128,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
       </div>
 
       {/* Content */}
-      <div className={cn("flex flex-col gap-1 min-w-0 flex-1", isMe ? "items-end" : "items-start")}>
+      <div className={cn("flex flex-col gap-1 min-w-0", isMe ? "items-end" : "items-start")}>
         <div className="flex items-baseline gap-2 px-1">
           <span className="text-sm font-semibold text-white/90">{message.username}</span>
           <span className="text-[11px] text-muted-foreground">{format(new Date(message.createdAt), 'HH:mm')}</span>
