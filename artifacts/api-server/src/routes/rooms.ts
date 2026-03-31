@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
 import { db, roomsTable, roomMembersTable } from "@workspace/db";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { authenticate } from "../middlewares/authenticate.js";
 
 const router: IRouter = Router();
 
-// List rooms: public + rooms user is a member of
+// List rooms: all public + all private (private rooms visible to all)
 router.get("/rooms", authenticate, async (req, res): Promise<void> => {
   const username = (req as any).user.username;
   try {
@@ -13,6 +13,10 @@ router.get("/rooms", authenticate, async (req, res): Promise<void> => {
     const memberships = await db.select().from(roomMembersTable)
       .where(and(eq(roomMembersTable.username, username), eq(roomMembersTable.status, "accepted")));
     const memberRoomIds = new Set(memberships.map(m => m.roomId));
+
+    const pendingMemberships = await db.select().from(roomMembersTable)
+      .where(and(eq(roomMembersTable.username, username), eq(roomMembersTable.status, "pending")));
+    const pendingRoomIds = new Set(pendingMemberships.map(m => m.roomId));
 
     // Count members per room
     const allMembers = await db.select().from(roomMembersTable).where(eq(roomMembersTable.status, "accepted"));
@@ -28,16 +32,17 @@ router.get("/rooms", authenticate, async (req, res): Promise<void> => {
       pendingCount[p.roomId] = (pendingCount[p.roomId] || 0) + 1;
     }
 
-    const result = allRooms
-      .filter(r => !r.isPrivate || memberRoomIds.has(r.id) || r.createdBy === username)
-      .map(r => ({
-        ...r,
-        memberCount: memberCount[r.id] || 0,
-        pendingCount: r.createdBy === username ? (pendingCount[r.id] || 0) : 0,
-        isMember: memberRoomIds.has(r.id) || r.createdBy === username,
-        isOwner: r.createdBy === username,
-        roomKey: `room:${r.id}`,
-      }));
+    const result = allRooms.map(r => ({
+      ...r,
+      password: undefined,
+      hasPassword: r.isPrivate && !!r.password,
+      memberCount: memberCount[r.id] || 0,
+      pendingCount: r.createdBy === username ? (pendingCount[r.id] || 0) : 0,
+      isMember: memberRoomIds.has(r.id) || r.createdBy === username,
+      isPending: pendingRoomIds.has(r.id),
+      isOwner: r.createdBy === username,
+      roomKey: `room:${r.id}`,
+    }));
 
     res.json(result);
   } catch (err) {
@@ -48,7 +53,7 @@ router.get("/rooms", authenticate, async (req, res): Promise<void> => {
 // Create room
 router.post("/rooms", authenticate, async (req, res): Promise<void> => {
   const username = (req as any).user.username;
-  const { name, description, isPrivate } = req.body;
+  const { name, description, isPrivate, password } = req.body;
   if (!name?.trim()) { res.status(400).json({ error: "Room name is required" }); return; }
 
   try {
@@ -57,6 +62,7 @@ router.post("/rooms", authenticate, async (req, res): Promise<void> => {
       description: description?.trim() || null,
       createdBy: username,
       isPrivate: Boolean(isPrivate),
+      password: isPrivate && password?.trim() ? password.trim() : null,
     }).returning();
 
     // Add creator as owner
@@ -67,7 +73,17 @@ router.post("/rooms", authenticate, async (req, res): Promise<void> => {
       status: "accepted",
     });
 
-    res.status(201).json({ ...room, roomKey: `room:${room.id}`, isMember: true, isOwner: true, memberCount: 1, pendingCount: 0 });
+    res.status(201).json({
+      ...room,
+      password: undefined,
+      hasPassword: room.isPrivate && !!room.password,
+      roomKey: `room:${room.id}`,
+      isMember: true,
+      isOwner: true,
+      memberCount: 1,
+      pendingCount: 0,
+      isPending: false,
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to create room" });
   }
@@ -93,10 +109,14 @@ router.get("/rooms/:id/members", authenticate, async (req, res): Promise<void> =
   }
 });
 
-// Join room (public) or request to join (private)
+// Join room
+// - Public room: join immediately
+// - Private + password: must provide correct password → join immediately
+// - Private + no password: send join request (pending)
 router.post("/rooms/:id/join", authenticate, async (req, res): Promise<void> => {
   const username = (req as any).user.username;
   const roomId = parseInt(req.params.id);
+  const { password } = req.body;
   try {
     const [room] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
     if (!room) { res.status(404).json({ error: "Room not found" }); return; }
@@ -109,14 +129,27 @@ router.post("/rooms/:id/join", authenticate, async (req, res): Promise<void> => 
       if (existing[0].status === "pending") { res.status(409).json({ error: "Request already pending" }); return; }
       if (existing[0].status === "invited") {
         await db.update(roomMembersTable).set({ status: "accepted" }).where(eq(roomMembersTable.id, existing[0].id));
-        res.json({ message: "Joined room" });
+        res.json({ message: "Joined room", status: "accepted" });
         return;
       }
     }
 
-    const status = room.isPrivate ? "pending" : "accepted";
+    let status: string;
+    if (!room.isPrivate) {
+      status = "accepted";
+    } else if (room.password) {
+      // Password-protected: check password
+      if (!password) { res.status(400).json({ error: "This room requires a password" }); return; }
+      if (password !== room.password) { res.status(403).json({ error: "Incorrect password" }); return; }
+      status = "accepted";
+    } else {
+      // Private without password: request to join
+      status = "pending";
+    }
+
     await db.insert(roomMembersTable).values({ roomId, username, role: "member", status });
-    res.status(201).json({ message: room.isPrivate ? "Join request sent" : "Joined room", status });
+    const message = status === "accepted" ? "Joined room" : "Join request sent";
+    res.status(201).json({ message, status });
   } catch {
     res.status(500).json({ error: "Failed to join room" });
   }

@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { AudioPlayer } from './AudioPlayer';
 import { cn } from '@/lib/utils';
 import { useStore, type MessageWithReactions } from '@/store';
-import { Edit2, Trash2, Reply, MoreVertical } from 'lucide-react';
+import { Edit2, Trash2, Reply, MoreVertical, Smile } from 'lucide-react';
 
 interface ChatBubbleProps {
   message: MessageWithReactions;
@@ -72,7 +72,8 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
 
   const handleDotsClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setShowActions(true);
+    setShowActions(p => !p);
+    setShowEmojiPicker(false);
     setShowDots(false);
   };
 
@@ -82,6 +83,12 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
 
   const handleMouseLeave = () => {
     if (!showActions && !showEmojiPicker) setShowDots(false);
+  };
+
+  const closeAll = () => {
+    setShowActions(false);
+    setShowDots(false);
+    setShowEmojiPicker(false);
   };
 
   if (message.isDeleted) {
@@ -121,7 +128,7 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
       </div>
 
       {/* Content */}
-      <div className={cn("flex flex-col gap-1 min-w-0", isMe ? "items-end" : "items-start")}>
+      <div className={cn("flex flex-col gap-1 min-w-0 flex-1", isMe ? "items-end" : "items-start")}>
         <div className="flex items-baseline gap-2 px-1">
           <span className="text-sm font-semibold text-white/90">{message.username}</span>
           <span className="text-[11px] text-muted-foreground">{format(new Date(message.createdAt), 'HH:mm')}</span>
@@ -141,18 +148,18 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
           </div>
         )}
 
-        {/* Message bubble with emoji picker floating above it */}
-        <div className="relative">
-          {/* Emoji picker - floats ABOVE the message bubble */}
+        {/* Emoji picker — floats ABOVE the bubble */}
+        <div className="relative w-full">
           <AnimatePresence>
             {showEmojiPicker && (
               <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.92 }}
+                initial={{ opacity: 0, y: 8, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 6, scale: 0.92 }}
+                exit={{ opacity: 0, y: 8, scale: 0.9 }}
+                transition={{ duration: 0.15 }}
                 onClick={e => e.stopPropagation()}
                 className={cn(
-                  "absolute bottom-full mb-2 z-40 flex gap-1 bg-card border border-border rounded-2xl p-2 shadow-2xl",
+                  "absolute bottom-full mb-2 z-50 flex gap-1 bg-card border border-border rounded-2xl p-2 shadow-2xl",
                   isMe ? "right-0" : "left-0"
                 )}
               >
@@ -230,88 +237,99 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
         )}
       </div>
 
-      {/* 3-dots trigger + action panel */}
-      <div className={cn(
-        "flex-shrink-0 self-center relative",
-        isMe ? "order-first" : ""
-      )}>
-        <AnimatePresence>
-          {/* 3-dots button (shows on hover) */}
-          {(showDots && !showActions && !isEditing) && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              onClick={handleDotsClick}
-              className="p-1.5 rounded-lg bg-card/80 border border-border shadow-md text-muted-foreground hover:text-white hover:bg-card transition-colors"
-            >
-              <MoreVertical size={14} />
-            </motion.button>
-          )}
-
-          {/* Action panel (shows after dots click or long press) */}
-          {(showActions && !isEditing) && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.88 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.88 }}
-              className={cn(
-                "absolute z-30 flex flex-col gap-0.5 bg-card border border-border rounded-2xl shadow-2xl p-1.5 min-w-[120px]",
-                isMe ? "right-full mr-2" : "left-full ml-2",
-                "top-1/2 -translate-y-1/2"
-              )}
-            >
-              {/* React */}
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(p => !p); }}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
+      {/* 3-dots trigger + horizontal action bar */}
+      {!isEditing && (
+        <div className={cn(
+          "flex-shrink-0 self-center relative",
+          isMe ? "order-first" : ""
+        )}>
+          <AnimatePresence mode="wait">
+            {/* 3-dots button (shows on hover, hidden when actions open) */}
+            {showDots && !showActions && (
+              <motion.button
+                key="dots"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.1 }}
+                onClick={handleDotsClick}
+                className="p-1.5 rounded-lg bg-card/80 border border-border shadow-md text-muted-foreground hover:text-white hover:bg-card transition-colors"
               >
-                <span className="text-base">😊</span>
-                <span>React</span>
-              </button>
+                <MoreVertical size={14} />
+              </motion.button>
+            )}
 
-              {/* Reply */}
-              {onReply && (
+            {/* Horizontal action bar */}
+            {showActions && (
+              <motion.div
+                key="actions"
+                initial={{ opacity: 0, scale: 0.85, x: isMe ? 8 : -8 }}
+                animate={{ opacity: 1, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.85 }}
+                transition={{ duration: 0.15, type: 'spring', damping: 20, stiffness: 300 }}
+                className={cn(
+                  "absolute z-30 flex flex-row items-center gap-0.5 bg-card border border-border rounded-2xl shadow-2xl p-1",
+                  isMe ? "right-full mr-2" : "left-full ml-2",
+                  "top-1/2 -translate-y-1/2"
+                )}
+                onClick={e => e.stopPropagation()}
+              >
+                {/* React */}
                 <button
-                  onClick={() => { onReply(message); setShowActions(false); setShowDots(false); }}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
+                  onClick={() => setShowEmojiPicker(p => !p)}
+                  title="React"
+                  className={cn(
+                    "w-8 h-8 flex items-center justify-center rounded-xl transition-colors text-base",
+                    showEmojiPicker
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:text-white hover:bg-white/10"
+                  )}
                 >
-                  <Reply size={14} />
-                  <span>Reply</span>
+                  <Smile size={15} />
                 </button>
-              )}
 
-              {/* Edit (own text messages only) */}
-              {isMe && message.messageType === 'text' && onEdit && (
-                <button
-                  onClick={() => {
-                    setIsEditing(true);
-                    setEditContent(message.content || '');
-                    setShowActions(false);
-                    setShowDots(false);
-                    setTimeout(() => editInputRef.current?.focus(), 50);
-                  }}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
-                >
-                  <Edit2 size={14} />
-                  <span>Edit</span>
-                </button>
-              )}
+                {/* Reply */}
+                {onReply && (
+                  <button
+                    onClick={() => { onReply(message); closeAll(); }}
+                    title="Reply"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <Reply size={15} />
+                  </button>
+                )}
 
-              {/* Delete (own messages only) */}
-              {isMe && onDelete && (
-                <button
-                  onClick={() => { onDelete(message.id); setShowActions(false); setShowDots(false); }}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors text-sm font-medium text-left w-full"
-                >
-                  <Trash2 size={14} />
-                  <span>Delete</span>
-                </button>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+                {/* Edit (own text messages only) */}
+                {isMe && message.messageType === 'text' && onEdit && (
+                  <button
+                    onClick={() => {
+                      setIsEditing(true);
+                      setEditContent(message.content || '');
+                      closeAll();
+                      setTimeout(() => editInputRef.current?.focus(), 50);
+                    }}
+                    title="Edit"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <Edit2 size={15} />
+                  </button>
+                )}
+
+                {/* Delete (own messages only) */}
+                {isMe && onDelete && (
+                  <button
+                    onClick={() => { onDelete(message.id); closeAll(); }}
+                    title="Delete"
+                    className="w-8 h-8 flex items-center justify-center rounded-xl text-muted-foreground hover:text-red-400 hover:bg-red-500/15 transition-colors"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Lock, Globe } from 'lucide-react';
+import { X, Lock, Globe, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useStore } from '@/store';
@@ -17,6 +17,8 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -27,7 +29,12 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
       const res = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, isPrivate }),
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim() || undefined,
+          isPrivate,
+          password: isPrivate && password.trim() ? password.trim() : undefined,
+        }),
       });
       if (!res.ok) throw new Error('Failed to create room');
       const room = await res.json();
@@ -35,6 +42,7 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
       setName('');
       setDescription('');
       setIsPrivate(false);
+      setPassword('');
       onClose();
       toast({ description: `Room "${room.name}" created!` });
     } catch {
@@ -99,7 +107,7 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setIsPrivate(false)}
+                      onClick={() => { setIsPrivate(false); setPassword(''); }}
                       className={cn(
                         'flex items-center gap-2 px-4 py-3 rounded-xl border transition-all text-sm font-medium',
                         !isPrivate ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-white/20 hover:text-white'
@@ -118,10 +126,47 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
                       <Lock size={16} /> Private
                     </button>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1.5">
-                    {isPrivate ? 'People must request to join or be invited.' : 'Anyone can join this room.'}
-                  </p>
                 </div>
+
+                {/* Password field — only shown for private rooms */}
+                <AnimatePresence>
+                  {isPrivate && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                        Room Password <span className="text-muted-foreground/50 normal-case font-normal">(optional)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={e => setPassword(e.target.value)}
+                          placeholder="Set a password so anyone can join instantly"
+                          maxLength={50}
+                          className="w-full bg-background border border-border rounded-xl px-4 py-2.5 pr-10 text-sm text-white placeholder-muted-foreground focus:outline-none focus:border-primary transition-colors"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(p => !p)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white transition-colors"
+                        >
+                          {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        {password.trim()
+                          ? 'Anyone with the password can join instantly, even when you\'re offline.'
+                          : 'Without a password, users must request to join and you approve them.'}
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-white hover:bg-white/5 transition-colors">
                     Cancel

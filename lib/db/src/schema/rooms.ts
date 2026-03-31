@@ -6,6 +6,7 @@ export const roomsTable = pgTable("rooms", {
   description: text("description"),
   createdBy: text("created_by").notNull(),
   isPrivate: boolean("is_private").notNull().default(false),
+  password: text("password"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

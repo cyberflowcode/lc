@@ -26,9 +26,11 @@ interface RoomItem {
   description?: string | null;
   createdBy: string;
   isPrivate: boolean;
+  hasPassword: boolean;
   memberCount: number;
   pendingCount: number;
   isMember: boolean;
+  isPending: boolean;
   isOwner: boolean;
   roomKey: string;
 }
@@ -71,6 +73,13 @@ export default function Dashboard() {
   const [allMembers, setAllMembers] = useState<RoomMemberItem[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  // Password-protected room joining
+  const [passwordRoom, setPasswordRoom] = useState<RoomItem | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
 
   useEffect(() => { if (!token) setLocation('/login'); }, [token, setLocation]);
 
@@ -157,17 +166,54 @@ export default function Dashboard() {
       handleRoomSelect(room.roomKey);
       return;
     }
+    // Private + password protected → show password modal
+    if (room.isPrivate && room.hasPassword) {
+      setPasswordRoom(room);
+      setPasswordInput('');
+      setPasswordError('');
+      setShowPasswordInput(false);
+      return;
+    }
+    // Private without password → send join request
+    if (room.isPrivate && !room.hasPassword) {
+      if (room.isPending) {
+        toast({ description: 'Your join request is already pending approval.' });
+        return;
+      }
+      setJoiningRoomId(room.id);
+      try {
+        const res = await fetch(`/api/rooms/${room.id}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          toast({ description: data.message });
+          fetchRooms();
+        } else {
+          toast({ variant: 'destructive', description: data.error });
+        }
+      } catch {
+        toast({ variant: 'destructive', description: 'Failed to request join' });
+      } finally {
+        setJoiningRoomId(null);
+      }
+      return;
+    }
+    // Public room → join immediately
     setJoiningRoomId(room.id);
     try {
       const res = await fetch(`/api/rooms/${room.id}/join`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (res.ok) {
         toast({ description: data.message });
         fetchRooms();
-        if (!room.isPrivate) handleRoomSelect(room.roomKey);
+        handleRoomSelect(room.roomKey);
       } else {
         toast({ variant: 'destructive', description: data.error });
       }
@@ -175,6 +221,33 @@ export default function Dashboard() {
       toast({ variant: 'destructive', description: 'Failed to join room' });
     } finally {
       setJoiningRoomId(null);
+    }
+  };
+
+  const handlePasswordJoin = async () => {
+    if (!passwordRoom || !passwordInput.trim()) return;
+    setPasswordLoading(true);
+    setPasswordError('');
+    try {
+      const res = await fetch(`/api/rooms/${passwordRoom.id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password: passwordInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ description: `Joined "${passwordRoom.name}"!` });
+        fetchRooms();
+        handleRoomSelect(passwordRoom.roomKey);
+        setPasswordRoom(null);
+        setPasswordInput('');
+      } else {
+        setPasswordError(data.error || 'Incorrect password');
+      }
+    } catch {
+      setPasswordError('Failed to join room');
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -364,13 +437,16 @@ export default function Dashboard() {
               : 'text-muted-foreground hover:bg-white/5 hover:text-white',
           )}>
             <button className="flex items-center gap-2.5 flex-1 min-w-0 text-left" onClick={() => { handleJoinRoom(room); closeMobile?.(); }}>
-              {room.isPrivate ? <Lock size={15} className="flex-shrink-0" /> : <Hash size={15} className="flex-shrink-0" />}
+              {room.isPrivate
+                ? <Lock size={15} className="flex-shrink-0" />
+                : <Hash size={15} className="flex-shrink-0" />}
               <span className="truncate flex-1">{room.name}</span>
               {room.isOwner && <Crown size={11} className="flex-shrink-0 text-yellow-400/70" title="You own this room" />}
-              {!room.isMember && (
-                room.isPrivate
-                  ? <Clock size={12} className="flex-shrink-0 text-yellow-500" title="Pending approval" />
-                  : <Plus size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100" />
+              {!room.isMember && !room.isPending && (
+                <Plus size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100" />
+              )}
+              {!room.isMember && room.isPending && (
+                <Clock size={12} className="flex-shrink-0 text-yellow-500" title="Request pending" />
               )}
               {joiningRoomId === room.id && <Loader2 size={12} className="animate-spin flex-shrink-0" />}
             </button>
@@ -405,6 +481,80 @@ export default function Dashboard() {
     <div className="h-[100dvh] w-full flex flex-col bg-background overflow-hidden text-foreground">
       <MatchOverlay />
       <CreateRoomModal open={createRoomOpen} onClose={() => setCreateRoomOpen(false)} onCreated={r => { setUserRooms(prev => [...prev, r]); fetchRooms(); }} />
+
+      {/* ── PASSWORD JOIN MODAL ── */}
+      <AnimatePresence>
+        {passwordRoom && (
+          <>
+            <motion.div key="pw-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
+              onClick={() => { setPasswordRoom(null); setPasswordInput(''); setPasswordError(''); }} />
+            <motion.div key="pw-modal" initial={{ opacity: 0, scale: 0.92, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 350 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+              <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl pointer-events-auto">
+                <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
+                  <div>
+                    <h2 className="font-bold text-white text-lg flex items-center gap-2">
+                      <Lock size={16} className="text-primary" />
+                      {passwordRoom.name}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">This room is password-protected</p>
+                  </div>
+                  <button onClick={() => { setPasswordRoom(null); setPasswordInput(''); setPasswordError(''); }}
+                    className="p-1.5 text-muted-foreground hover:text-white rounded-lg hover:bg-white/5 transition-colors">
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="px-5 py-4 space-y-4">
+                  {passwordRoom.description && (
+                    <p className="text-sm text-muted-foreground">{passwordRoom.description}</p>
+                  )}
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Password</label>
+                    <input
+                      autoFocus
+                      type={showPasswordInput ? 'text' : 'password'}
+                      value={passwordInput}
+                      onChange={e => { setPasswordInput(e.target.value); setPasswordError(''); }}
+                      onKeyDown={e => e.key === 'Enter' && handlePasswordJoin()}
+                      placeholder="Enter room password"
+                      className={cn(
+                        "w-full bg-background border rounded-xl px-4 py-2.5 text-sm text-white placeholder-muted-foreground focus:outline-none transition-colors",
+                        passwordError ? "border-destructive focus:border-destructive" : "border-border focus:border-primary"
+                      )}
+                    />
+                    {passwordError && (
+                      <p className="text-xs text-destructive mt-1.5">{passwordError}</p>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" checked={showPasswordInput} onChange={e => setShowPasswordInput(e.target.checked)}
+                      className="rounded" />
+                    <span className="text-xs text-muted-foreground">Show password</span>
+                  </label>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => { setPasswordRoom(null); setPasswordInput(''); setPasswordError(''); }}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-white hover:bg-white/5 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handlePasswordJoin}
+                      disabled={passwordLoading || !passwordInput.trim()}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                    >
+                      {passwordLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Join Room
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* ── ROOM MANAGE MODAL ── */}
       <AnimatePresence>
