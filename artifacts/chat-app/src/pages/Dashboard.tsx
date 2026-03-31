@@ -42,7 +42,7 @@ interface RoomMemberItem {
   status: string;
 }
 
-type MobilePanel = 'rooms' | 'friends' | 'people' | null;
+type MobilePanel = 'rooms' | 'friends' | 'dms' | 'people' | null;
 type ManageTab = 'requests' | 'members';
 
 function getDmRoom(me: string, other: string) {
@@ -59,7 +59,7 @@ export default function Dashboard() {
   } = useStore();
   const { toast } = useToast();
 
-  const [sidebarTab, setSidebarTab] = useState<'rooms' | 'friends'>('rooms');
+  const [sidebarTab, setSidebarTab] = useState<'rooms' | 'friends' | 'dms'>('rooms');
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -80,6 +80,22 @@ export default function Dashboard() {
   const [passwordError, setPasswordError] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [showPasswordInput, setShowPasswordInput] = useState(false);
+
+  // DM conversations (persisted per user in localStorage)
+  const dmStorageKey = user ? `litchat_dms_${user.username}` : null;
+  const [dmConversations, setDmConversations] = useState<string[]>(() => {
+    if (!user) return [];
+    try { return JSON.parse(localStorage.getItem(`litchat_dms_${user.username}`) || '[]'); } catch { return []; }
+  });
+
+  const addDmConversation = (username: string) => {
+    setDmConversations(prev => {
+      if (prev.includes(username)) return prev;
+      const next = [username, ...prev];
+      if (dmStorageKey) localStorage.setItem(dmStorageKey, JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => { if (!token) setLocation('/login'); }, [token, setLocation]);
 
@@ -311,7 +327,8 @@ export default function Dashboard() {
     if (!user) return;
     const dmRoom = getDmRoom(user.username, username);
     handleRoomSelect(dmRoom);
-    setSidebarTab('rooms');
+    addDmConversation(username);
+    setSidebarTab('dms');
     setMobilePanel(null);
   };
 
@@ -737,7 +754,7 @@ export default function Dashboard() {
             </div>
             <div className="px-4 pb-2 flex items-center justify-between flex-shrink-0">
               <h3 className="font-bold text-white text-base capitalize">
-                {mobilePanel === 'rooms' ? 'Chat Rooms' : mobilePanel === 'friends' ? 'Friends' : 'Online People'}
+                {mobilePanel === 'rooms' ? 'Chat Rooms' : mobilePanel === 'friends' ? 'Friends' : mobilePanel === 'dms' ? 'Direct Messages' : 'Online People'}
               </h3>
               <button onClick={() => setMobilePanel(null)} className="p-1.5 text-muted-foreground hover:text-white rounded-lg">
                 <X size={18} />
@@ -769,6 +786,44 @@ export default function Dashboard() {
             {mobilePanel === 'friends' && (
               <div className="flex-1 min-h-0 overflow-hidden">
                 <FriendsPanel onDmUser={handleDmUser} />
+              </div>
+            )}
+
+            {/* Mobile DMs panel */}
+            {mobilePanel === 'dms' && (
+              <div className="flex-1 overflow-y-auto px-4 pb-4">
+                {dmConversations.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    <MessageCircle size={32} className="mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">No DMs yet</p>
+                    <p className="text-xs mt-1 opacity-60">Message a friend to start!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1 mt-2">
+                    {dmConversations.map(username => {
+                      const dmRoom = getDmRoom(user!.username, username);
+                      const isActive = activeRoom === dmRoom;
+                      return (
+                        <button
+                          key={username}
+                          onClick={() => { handleRoomSelect(dmRoom); setMobilePanel(null); }}
+                          className={cn(
+                            'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left',
+                            isActive
+                              ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
+                              : 'text-muted-foreground hover:bg-white/5 hover:text-white'
+                          )}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-secondary border border-white/10 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                            {username[0].toUpperCase()}
+                          </div>
+                          <span className="truncate flex-1">{username}</span>
+                          {isActive && <div className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -848,6 +903,18 @@ export default function Dashboard() {
               <Hash size={13} /> Rooms
             </button>
             <button
+              onClick={() => setSidebarTab('dms')}
+              className={cn(
+                "flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors relative",
+                sidebarTab === 'dms' ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-white"
+              )}
+            >
+              <MessageCircle size={13} /> DMs
+              {dmConversations.length > 0 && sidebarTab !== 'dms' && (
+                <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-primary" />
+              )}
+            </button>
+            <button
               onClick={() => setSidebarTab('friends')}
               className={cn(
                 "flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
@@ -876,6 +943,42 @@ export default function Dashboard() {
                 </button>
               </div>
             </>
+          ) : sidebarTab === 'dms' ? (
+            <div className="flex-1 overflow-y-auto p-4">
+              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3 ml-1 px-1">Direct Messages</h3>
+              {dmConversations.length === 0 ? (
+                <div className="text-center py-10 text-muted-foreground">
+                  <MessageCircle size={32} className="mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">No DMs yet</p>
+                  <p className="text-xs mt-1 opacity-60">Message a friend to start!</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {dmConversations.map(username => {
+                    const dmRoom = getDmRoom(user!.username, username);
+                    const isActive = activeRoom === dmRoom;
+                    return (
+                      <button
+                        key={username}
+                        onClick={() => handleRoomSelect(dmRoom)}
+                        className={cn(
+                          'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left',
+                          isActive
+                            ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
+                            : 'text-muted-foreground hover:bg-white/5 hover:text-white'
+                        )}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-secondary border border-white/10 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                          {username[0].toUpperCase()}
+                        </div>
+                        <span className="truncate flex-1">{username}</span>
+                        {isActive && <div className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-hidden">
               <FriendsPanel onDmUser={handleDmUser} />
@@ -1130,6 +1233,19 @@ export default function Dashboard() {
                   >
                     <Hash size={18} />
                     <span className="text-[10px] font-semibold">Rooms</span>
+                  </button>
+                  <button
+                    onClick={() => toggleMobilePanel('dms')}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-0.5 px-4 py-2 transition-colors relative",
+                      mobilePanel === 'dms' ? "text-primary" : "text-muted-foreground hover:text-white"
+                    )}
+                  >
+                    <MessageCircle size={18} />
+                    <span className="text-[10px] font-semibold">DMs</span>
+                    {dmConversations.length > 0 && mobilePanel !== 'dms' && (
+                      <span className="absolute top-1 right-2 w-1.5 h-1.5 rounded-full bg-primary" />
+                    )}
                   </button>
                   <button
                     onClick={() => toggleMobilePanel('friends')}
