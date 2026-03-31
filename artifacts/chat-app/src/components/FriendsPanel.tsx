@@ -1,19 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/store';
 import { useGetFriends, useGetFriendRequests, useSendFriendRequest, useAcceptFriendRequest, useRemoveFriend } from '@workspace/api-client-react';
-import { UserPlus, Check, X, MessageCircle, Users, Clock } from 'lucide-react';
+import { UserPlus, Check, X, MessageCircle, Users, Clock, Search, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { AnimatePresence, motion } from 'framer-motion';
 
 interface FriendsPanelProps {
   onDmUser: (username: string) => void;
+}
+
+interface UserResult {
+  username: string;
+  avatar: string;
 }
 
 export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
   const { token, user } = useStore();
   const { toast } = useToast();
   const [addUsername, setAddUsername] = useState('');
+  const [searchResults, setSearchResults] = useState<UserResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState<'friends' | 'requests'>('friends');
+  const searchRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const { data: friends = [], refetch: refetchFriends } = useGetFriends({
     request: { headers: { Authorization: `Bearer ${token}` } },
@@ -31,6 +42,8 @@ export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
       onSuccess: () => {
         toast({ description: `Friend request sent to ${addUsername}` });
         setAddUsername('');
+        setSearchResults([]);
+        setShowDropdown(false);
         refetchFriends();
       },
       onError: (e: any) => {
@@ -60,34 +73,144 @@ export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
     },
   });
 
-  const handleSendRequest = () => {
-    if (!addUsername.trim()) return;
-    sendRequest.mutate({ username: addUsername.trim() });
+  // Real-time search with debounce
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!addUsername.trim()) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    setSearchLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(addUsername.trim())}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data);
+          setShowDropdown(true);
+        }
+      } catch {}
+      setSearchLoading(false);
+    }, 250);
+    return () => clearTimeout(debounceRef.current);
+  }, [addUsername, token]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const handleSendRequest = (username?: string) => {
+    const target = username || addUsername.trim();
+    if (!target) return;
+    setAddUsername(target);
+    sendRequest.mutate({ username: target });
+    setShowDropdown(false);
   };
 
   const getFriendName = (friendship: any) =>
     friendship.requester === user?.username ? friendship.recipient : friendship.requester;
 
+  const friendUsernames = new Set(friends.map((f: any) => getFriendName(f)));
+  const pendingUsernames = new Set(requests.map((r: any) => r.requester));
+
   return (
     <div className="flex flex-col h-full">
-      {/* Add friend input */}
+      {/* Add friend search */}
       <div className="p-4 border-b border-border">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={addUsername}
-            onChange={e => setAddUsername(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSendRequest()}
-            placeholder="Add friend..."
-            className="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
-          />
-          <button
-            onClick={handleSendRequest}
-            disabled={!addUsername.trim() || sendRequest.isPending}
-            className="p-2 bg-primary text-white rounded-xl hover:bg-primary/90 disabled:opacity-50 transition-colors"
-          >
-            <UserPlus size={16} />
-          </button>
+        <div ref={searchRef} className="relative">
+          <div className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-xl px-3 py-2 focus-within:border-primary/50 transition-colors">
+            {searchLoading
+              ? <Loader2 size={14} className="text-muted-foreground flex-shrink-0 animate-spin" />
+              : <Search size={14} className="text-muted-foreground flex-shrink-0" />
+            }
+            <input
+              type="text"
+              value={addUsername}
+              onChange={e => setAddUsername(e.target.value)}
+              onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSendRequest();
+                if (e.key === 'Escape') setShowDropdown(false);
+              }}
+              placeholder="Search users to add..."
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/30 focus:outline-none min-w-0"
+            />
+            {addUsername && (
+              <button
+                onClick={() => handleSendRequest()}
+                disabled={!addUsername.trim() || sendRequest.isPending}
+                className="flex-shrink-0 p-1 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary disabled:opacity-40 transition-colors"
+                title="Send friend request"
+              >
+                <UserPlus size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Real-time dropdown */}
+          <AnimatePresence>
+            {showDropdown && searchResults.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
+              >
+                {searchResults.map((u, i) => {
+                  const isFriend = friendUsernames.has(u.username);
+                  const isPending = pendingUsernames.has(u.username);
+                  return (
+                    <div
+                      key={u.username}
+                      className={cn(
+                        "flex items-center gap-2.5 px-3 py-2.5 transition-colors",
+                        i !== searchResults.length - 1 && "border-b border-border/50",
+                        !isFriend && !isPending ? "hover:bg-white/5 cursor-pointer" : "opacity-60"
+                      )}
+                      onClick={() => !isFriend && !isPending && handleSendRequest(u.username)}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-base flex-shrink-0">
+                        {u.avatar}
+                      </div>
+                      <span className="flex-1 text-sm font-medium text-white truncate">{u.username}</span>
+                      {isFriend && (
+                        <span className="text-[10px] text-green-400 font-semibold flex-shrink-0">Friends</span>
+                      )}
+                      {isPending && !isFriend && (
+                        <span className="text-[10px] text-yellow-400 font-semibold flex-shrink-0">Pending</span>
+                      )}
+                      {!isFriend && !isPending && (
+                        <UserPlus size={13} className="text-primary flex-shrink-0" />
+                      )}
+                    </div>
+                  );
+                })}
+              </motion.div>
+            )}
+
+            {showDropdown && searchResults.length === 0 && !searchLoading && addUsername.trim() && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl px-4 py-4 text-center"
+              >
+                <p className="text-sm text-muted-foreground">No users found for "<span className="text-white">{addUsername}</span>"</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -132,7 +255,7 @@ export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
             <div className="text-center py-8 text-muted-foreground text-sm">
               <Users size={32} className="mx-auto mb-2 opacity-30" />
               <p>No friends yet</p>
-              <p className="text-xs mt-1 opacity-60">Add someone above!</p>
+              <p className="text-xs mt-1 opacity-60">Search someone above!</p>
             </div>
           ) : (
             friends.map((f: any) => {
