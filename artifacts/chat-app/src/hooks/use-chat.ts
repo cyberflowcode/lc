@@ -8,7 +8,7 @@ export function useChat() {
   const socketRef = useRef<Socket | null>(null);
   const {
     token, activeRoom, setRoomUsers, setAllOnlineUsers,
-    matchState, setMatchState, addMatchMessage, clearMatch,
+    matchState, setMatchState, addMatchMessage, clearMatch, setActiveRoom,
   } = useStore();
   const queryClient = useQueryClient();
 
@@ -81,6 +81,22 @@ export function useChat() {
       window.dispatchEvent(new CustomEvent('room-access-denied', { detail: message }));
     });
 
+    socket.on('kicked-from-room', ({ roomKey }: { roomKey: string }) => {
+      const { activeRoom: current } = useStore.getState();
+      if (current === roomKey) {
+        useStore.getState().setActiveRoom('Global');
+      }
+      window.dispatchEvent(new CustomEvent('kicked-from-room', { detail: 'You have been removed from this room.' }));
+    });
+
+    socket.on('room-deleted', ({ roomKey }: { roomKey: string }) => {
+      const { activeRoom: current } = useStore.getState();
+      if (current === roomKey) {
+        useStore.getState().setActiveRoom('Global');
+      }
+      window.dispatchEvent(new CustomEvent('room-deleted', { detail: roomKey }));
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -115,11 +131,19 @@ export function useChat() {
     socketRef.current?.emit('react-message', { messageId, emoji, room: useStore.getState().activeRoom });
   };
 
+  const kickMember = (roomId: number, username: string) => {
+    socketRef.current?.emit('kick-member', { roomId, username, token: useStore.getState().token });
+  };
+
+  const deleteRoom = (roomId: number) => {
+    socketRef.current?.emit('delete-room', { roomId, token: useStore.getState().token });
+  };
+
   const startMatch = () => socketRef.current?.emit('start-match', { token });
   const exitMatch = () => {
     socketRef.current?.emit('exit-match');
     useStore.getState().clearMatch();
   };
 
-  return { sendMessage, editMessage, deleteMessage, reactMessage, startMatch, exitMatch };
+  return { sendMessage, editMessage, deleteMessage, reactMessage, kickMember, deleteRoom, startMatch, exitMatch };
 }

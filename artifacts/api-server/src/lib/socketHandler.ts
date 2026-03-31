@@ -52,7 +52,6 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         return;
       }
 
-      // For user-created rooms (room:ID format), check membership
       if (room.startsWith("room:")) {
         const roomId = parseInt(room.split(":")[1]);
         if (!isNaN(roomId)) {
@@ -195,6 +194,56 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         io.to(room).emit("message-updated", withReactions);
       } catch (err) {
         logger.error({ err }, "Error reacting to message");
+      }
+    });
+
+    socket.on("kick-member", async ({ roomId, username, token }: { roomId: number; username: string; token: string }) => {
+      const payload = verifyToken(token);
+      if (!payload) return;
+
+      try {
+        const [room] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
+        if (!room || room.createdBy !== payload.username) return;
+
+        await db.delete(roomMembersTable).where(
+          and(eq(roomMembersTable.roomId, roomId), eq(roomMembersTable.username, username))
+        );
+
+        const roomKey = `room:${roomId}`;
+        for (const [socketId, connUser] of connectedUsers) {
+          if (connUser.username === username) {
+            io.to(socketId).emit("kicked-from-room", { roomId, roomKey });
+          }
+        }
+
+        logger.info({ owner: payload.username, kicked: username, roomId }, "User kicked from room");
+      } catch (err) {
+        logger.error({ err }, "Error kicking member");
+      }
+    });
+
+    socket.on("delete-room", async ({ roomId, token }: { roomId: number; token: string }) => {
+      const payload = verifyToken(token);
+      if (!payload) return;
+
+      try {
+        const [room] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
+        if (!room || room.createdBy !== payload.username) return;
+
+        const roomKey = `room:${roomId}`;
+
+        const messages = await db.select({ id: messagesTable.id }).from(messagesTable).where(eq(messagesTable.room, roomKey));
+        for (const msg of messages) {
+          await db.delete(messageReactionsTable).where(eq(messageReactionsTable.messageId, msg.id));
+        }
+        await db.delete(messagesTable).where(eq(messagesTable.room, roomKey));
+        await db.delete(roomMembersTable).where(eq(roomMembersTable.roomId, roomId));
+        await db.delete(roomsTable).where(eq(roomsTable.id, roomId));
+
+        io.to(roomKey).emit("room-deleted", { roomId, roomKey });
+        logger.info({ owner: payload.username, roomId }, "Room deleted");
+      } catch (err) {
+        logger.error({ err }, "Error deleting room");
       }
     });
 

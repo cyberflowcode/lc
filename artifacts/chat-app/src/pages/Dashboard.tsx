@@ -11,13 +11,14 @@ import { CreateRoomModal } from '@/components/CreateRoomModal';
 import {
   LogOut, Hash, Send, Mic, Square, Loader2,
   Users, Zap, ChevronLeft, Globe, Gamepad2, X,
-  MessageCircle, UserPlus, ArrowLeft, Lock, Plus, Bell, Clock,
+  MessageCircle, UserPlus, ArrowLeft, Lock, Plus, Clock,
+  Settings, Trash2, UserX, Crown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const ROOMS = ['Global', 'Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5'];
+const DEFAULT_ROOMS = ['Global'];
 
 interface RoomItem {
   id: number;
@@ -32,7 +33,15 @@ interface RoomItem {
   roomKey: string;
 }
 
+interface RoomMemberItem {
+  id: number;
+  username: string;
+  role: string;
+  status: string;
+}
+
 type MobilePanel = 'rooms' | 'friends' | 'people' | null;
+type ManageTab = 'requests' | 'members';
 
 function getDmRoom(me: string, other: string) {
   return `dm:${[me, other].sort().join(':')}`;
@@ -55,8 +64,13 @@ export default function Dashboard() {
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const [userRooms, setUserRooms] = useState<RoomItem[]>([]);
   const [joiningRoomId, setJoiningRoomId] = useState<number | null>(null);
-  const [requestsRoomId, setRequestsRoomId] = useState<number | null>(null);
-  const [pendingMembers, setPendingMembers] = useState<any[]>([]);
+
+  // Room management modal
+  const [manageRoom, setManageRoom] = useState<RoomItem | null>(null);
+  const [manageTab, setManageTab] = useState<ManageTab>('requests');
+  const [allMembers, setAllMembers] = useState<RoomMemberItem[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   useEffect(() => { if (!token) setLocation('/login'); }, [token, setLocation]);
 
@@ -76,28 +90,66 @@ export default function Dashboard() {
     return () => window.removeEventListener('room-access-denied', handler);
   }, [toast]);
 
-  const openRequests = async (room: RoomItem) => {
-    setRequestsRoomId(room.id);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      toast({ variant: 'destructive', description: (e as CustomEvent).detail });
+    };
+    window.addEventListener('kicked-from-room', handler);
+    return () => window.removeEventListener('kicked-from-room', handler);
+  }, [toast]);
+
+  useEffect(() => {
+    const handler = () => {
+      fetchRooms();
+      toast({ description: 'A room you were in has been deleted.' });
+    };
+    window.addEventListener('room-deleted', handler);
+    return () => window.removeEventListener('room-deleted', handler);
+  }, [toast, fetchRooms]);
+
+  const openManage = async (room: RoomItem) => {
+    setManageRoom(room);
+    setManageTab('requests');
+    setDeleteConfirm(false);
+    setMembersLoading(true);
     try {
       const res = await fetch(`/api/rooms/${room.id}/members`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const members = await res.json();
-        setPendingMembers(members.filter((m: any) => m.status === 'pending'));
-      }
+      if (res.ok) setAllMembers(await res.json());
     } catch {}
+    setMembersLoading(false);
   };
 
-  const handleAcceptMember = async (roomId: number, username: string) => {
-    await fetch(`/api/rooms/${roomId}/accept/${username}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-    setPendingMembers(prev => prev.filter(m => m.username !== username));
+  const handleAcceptMember = async (username: string) => {
+    if (!manageRoom) return;
+    await fetch(`/api/rooms/${manageRoom.id}/accept/${username}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    setAllMembers(prev => prev.map(m => m.username === username ? { ...m, status: 'accepted' } : m));
     fetchRooms();
     toast({ description: `${username} accepted!` });
   };
 
-  const handleDeclineMember = async (roomId: number, username: string) => {
-    await fetch(`/api/rooms/${roomId}/members/${username}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    setPendingMembers(prev => prev.filter(m => m.username !== username));
+  const handleDeclineMember = async (username: string) => {
+    if (!manageRoom) return;
+    await fetch(`/api/rooms/${manageRoom.id}/members/${username}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    setAllMembers(prev => prev.filter(m => m.username !== username));
     fetchRooms();
+  };
+
+  const handleKickMember = (username: string) => {
+    if (!manageRoom) return;
+    kickMember(manageRoom.id, username);
+    setAllMembers(prev => prev.filter(m => m.username !== username));
+    fetchRooms();
+    toast({ description: `${username} has been removed from the room.` });
+  };
+
+  const handleDeleteRoom = () => {
+    if (!manageRoom) return;
+    deleteRoom(manageRoom.id);
+    setManageRoom(null);
+    setDeleteConfirm(false);
+    setUserRooms(prev => prev.filter(r => r.id !== manageRoom.id));
+    if (activeRoom === manageRoom.roomKey) setActiveRoom('Global');
+    toast({ description: 'Room deleted.' });
   };
 
   const handleJoinRoom = async (room: RoomItem) => {
@@ -131,7 +183,7 @@ export default function Dashboard() {
     query: { enabled: !!token, retry: false },
   });
 
-  const { sendMessage, editMessage, deleteMessage, reactMessage, startMatch, exitMatch } = useChat();
+  const { sendMessage, editMessage, deleteMessage, reactMessage, kickMember, deleteRoom, startMatch, exitMatch } = useChat();
   const { isRecording, duration, startRecording, stopRecording } = useAudioRecorder();
 
   const [inputText, setInputText] = useState('');
@@ -243,6 +295,10 @@ export default function Dashboard() {
   const dmOtherUser = isDm ? activeRoom.replace('dm:', '').split(':').find(n => n !== user.username) : null;
   const isUserRoom = activeRoom.startsWith('room:');
   const activeUserRoom = isUserRoom ? userRooms.find(r => r.roomKey === activeRoom) : null;
+  const isRoomOwner = activeUserRoom?.isOwner ?? false;
+
+  const pendingMembers = allMembers.filter(m => m.status === 'pending');
+  const acceptedMembers = allMembers.filter(m => m.status === 'accepted');
 
   const roomHeader = isDm
     ? <><ArrowLeft size={16} className="text-primary" /><span className="text-white">DM: {dmOtherUser}</span></>
@@ -252,46 +308,248 @@ export default function Dashboard() {
         ? <><Globe size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>
         : <><Hash size={16} className="text-primary" /><span className="text-white">{activeRoom}</span></>;
 
+  // Sidebar room list renderer (reused for desktop and mobile)
+  const renderRoomList = (closeMobile?: () => void) => (
+    <div className="space-y-1">
+      <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3 ml-1 px-1">Chat Rooms</h3>
+      {DEFAULT_ROOMS.map(room => (
+        <button
+          key={room}
+          onClick={() => { handleRoomSelect(room); closeMobile?.(); }}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all',
+            activeRoom === room
+              ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
+              : 'text-muted-foreground hover:bg-white/5 hover:text-white',
+          )}
+        >
+          <Globe size={18} />
+          {room}
+          {activeRoom === room && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />}
+        </button>
+      ))}
+
+      {isDm && (
+        <div className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]">
+          <MessageCircle size={18} />
+          DM: {dmOtherUser}
+          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
+        </div>
+      )}
+
+      {/* User-created rooms */}
+      <div className="pt-4 mt-2 border-t border-border">
+        <div className="flex items-center justify-between mb-2 px-1">
+          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rooms</h3>
+          <button
+            onClick={() => { closeMobile?.(); setCreateRoomOpen(true); }}
+            className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors"
+            title="Create room"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+        {userRooms.length === 0 ? (
+          <button
+            onClick={() => { closeMobile?.(); setCreateRoomOpen(true); }}
+            className="w-full text-xs text-muted-foreground hover:text-white text-center py-3 rounded-xl hover:bg-white/5 transition-colors"
+          >
+            + Create your first room
+          </button>
+        ) : userRooms.map(room => (
+          <div key={room.id} className={cn(
+            'w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group',
+            activeRoom === room.roomKey
+              ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
+              : 'text-muted-foreground hover:bg-white/5 hover:text-white',
+          )}>
+            <button className="flex items-center gap-2.5 flex-1 min-w-0 text-left" onClick={() => { handleJoinRoom(room); closeMobile?.(); }}>
+              {room.isPrivate ? <Lock size={15} className="flex-shrink-0" /> : <Hash size={15} className="flex-shrink-0" />}
+              <span className="truncate flex-1">{room.name}</span>
+              {room.isOwner && <Crown size={11} className="flex-shrink-0 text-yellow-400/70" title="You own this room" />}
+              {!room.isMember && (
+                room.isPrivate
+                  ? <Clock size={12} className="flex-shrink-0 text-yellow-500" title="Pending approval" />
+                  : <Plus size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100" />
+              )}
+              {joiningRoomId === room.id && <Loader2 size={12} className="animate-spin flex-shrink-0" />}
+            </button>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {room.isOwner && room.pendingCount > 0 && (
+                <button
+                  onClick={() => { closeMobile?.(); openManage(room); setManageTab('requests'); }}
+                  className="w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold hover:bg-yellow-500/30 transition-colors"
+                  title={`${room.pendingCount} join request(s)`}
+                >
+                  {room.pendingCount}
+                </button>
+              )}
+              {room.isOwner && (
+                <button
+                  onClick={() => { closeMobile?.(); openManage(room); }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-all"
+                  title="Manage room"
+                >
+                  <Settings size={13} />
+                </button>
+              )}
+              {activeRoom === room.roomKey && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background overflow-hidden text-foreground">
       <MatchOverlay />
-      <CreateRoomModal open={createRoomOpen} onClose={() => setCreateRoomOpen(false)} onCreated={r => setUserRooms(prev => [...prev, r])} />
+      <CreateRoomModal open={createRoomOpen} onClose={() => setCreateRoomOpen(false)} onCreated={r => { setUserRooms(prev => [...prev, r]); fetchRooms(); }} />
 
-      {/* Join requests modal */}
+      {/* ── ROOM MANAGE MODAL ── */}
       <AnimatePresence>
-        {requestsRoomId !== null && (
+        {manageRoom && (
           <>
-            <motion.div key="req-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            <motion.div key="manage-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
-              onClick={() => setRequestsRoomId(null)} />
-            <motion.div key="req-modal" initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+              onClick={() => { setManageRoom(null); setDeleteConfirm(false); }} />
+            <motion.div key="manage-modal" initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
               className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-              <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl pointer-events-auto">
-                <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border">
-                  <h2 className="font-bold text-white text-lg">Join Requests</h2>
-                  <button onClick={() => setRequestsRoomId(null)} className="p-1.5 text-muted-foreground hover:text-white rounded-lg hover:bg-white/5">
+              <div className="w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl pointer-events-auto flex flex-col max-h-[80vh]">
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border flex-shrink-0">
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-white text-lg truncate">{manageRoom.name}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                      <Crown size={11} className="text-yellow-400" /> You own this room
+                    </p>
+                  </div>
+                  <button onClick={() => { setManageRoom(null); setDeleteConfirm(false); }} className="p-1.5 text-muted-foreground hover:text-white rounded-lg hover:bg-white/5 flex-shrink-0 ml-3">
                     <X size={18} />
                   </button>
                 </div>
-                <div className="px-5 py-4 space-y-2 max-h-80 overflow-y-auto">
-                  {pendingMembers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">No pending requests</p>
-                  ) : pendingMembers.map(m => (
-                    <div key={m.username} className="flex items-center gap-3 py-2">
-                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
-                        {m.username[0].toUpperCase()}
-                      </div>
-                      <span className="text-sm text-white flex-1 font-medium">{m.username}</span>
-                      <button onClick={() => handleDeclineMember(requestsRoomId, m.username)}
-                        className="px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
-                        Decline
-                      </button>
-                      <button onClick={() => handleAcceptMember(requestsRoomId, m.username)}
-                        className="px-2.5 py-1 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors">
-                        Accept
-                      </button>
+
+                {/* Tabs */}
+                <div className="flex border-b border-border flex-shrink-0">
+                  <button
+                    onClick={() => setManageTab('requests')}
+                    className={cn(
+                      "flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
+                      manageTab === 'requests' ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-white"
+                    )}
+                  >
+                    <Clock size={12} />
+                    Requests
+                    {pendingMembers.length > 0 && (
+                      <span className="w-4 h-4 rounded-full bg-yellow-500 text-black text-[9px] font-bold flex items-center justify-center">
+                        {pendingMembers.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setManageTab('members')}
+                    className={cn(
+                      "flex-1 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
+                      manageTab === 'members' ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-white"
+                    )}
+                  >
+                    <Users size={12} />
+                    Members
+                    <span className="text-muted-foreground font-normal">({acceptedMembers.length})</span>
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {membersLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 size={20} className="animate-spin text-muted-foreground" />
                     </div>
-                  ))}
+                  ) : manageTab === 'requests' ? (
+                    <div className="px-5 py-4 space-y-2">
+                      {pendingMembers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">No pending requests</p>
+                      ) : pendingMembers.map(m => (
+                        <div key={m.username} className="flex items-center gap-3 py-2.5 border-b border-border/50 last:border-0">
+                          <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-white flex-shrink-0">
+                            {m.username[0].toUpperCase()}
+                          </div>
+                          <span className="text-sm text-white flex-1 font-medium truncate">{m.username}</span>
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <button onClick={() => handleDeclineMember(m.username)}
+                              className="px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors">
+                              Decline
+                            </button>
+                            <button onClick={() => handleAcceptMember(m.username)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors">
+                              Accept
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-5 py-4 space-y-2">
+                      {acceptedMembers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">No members yet</p>
+                      ) : acceptedMembers.map(m => {
+                        const isOwnerMember = m.role === 'owner' || m.username === manageRoom.createdBy;
+                        return (
+                          <div key={m.username} className="flex items-center gap-3 py-2.5 border-b border-border/50 last:border-0">
+                            <div className="relative flex-shrink-0">
+                              <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-white">
+                                {m.username[0].toUpperCase()}
+                              </div>
+                              {isOwnerMember && (
+                                <Crown size={10} className="absolute -bottom-0.5 -right-0.5 text-yellow-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-white font-medium truncate">{m.username}</p>
+                              <p className="text-[11px] text-muted-foreground">{isOwnerMember ? 'Owner' : 'Member'}</p>
+                            </div>
+                            {!isOwnerMember && (
+                              <button
+                                onClick={() => handleKickMember(m.username)}
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors flex-shrink-0"
+                                title={`Kick ${m.username}`}
+                              >
+                                <UserX size={12} />
+                                Kick
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer - Delete Room */}
+                <div className="px-5 py-4 border-t border-border flex-shrink-0">
+                  {!deleteConfirm ? (
+                    <button
+                      onClick={() => setDeleteConfirm(true)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors text-sm font-semibold"
+                    >
+                      <Trash2 size={14} />
+                      Delete Room
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-center text-muted-foreground">This will permanently delete the room and all messages. Are you sure?</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => setDeleteConfirm(false)}
+                          className="flex-1 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-white transition-colors text-sm font-semibold">
+                          Cancel
+                        </button>
+                        <button onClick={handleDeleteRoom}
+                          className="flex-1 py-2 rounded-xl bg-destructive text-white hover:bg-destructive/90 transition-colors text-sm font-semibold">
+                          Yes, Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -324,12 +582,9 @@ export default function Dashboard() {
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             className="fixed bottom-[57px] left-0 right-0 z-50 bg-card rounded-t-3xl border-t border-border shadow-2xl lg:hidden flex flex-col h-[72vh]"
           >
-            {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
               <div className="w-10 h-1 rounded-full bg-white/20" />
             </div>
-
-            {/* Panel header */}
             <div className="px-4 pb-2 flex items-center justify-between flex-shrink-0">
               <h3 className="font-bold text-white text-base capitalize">
                 {mobilePanel === 'rooms' ? 'Chat Rooms' : mobilePanel === 'friends' ? 'Friends' : 'Online People'}
@@ -339,69 +594,11 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Rooms panel */}
+            {/* Mobile Rooms panel */}
             {mobilePanel === 'rooms' && (
               <div className="flex flex-col flex-1 min-h-0">
-                <div className="flex-1 overflow-y-auto px-3 pb-2 space-y-1">
-                  {ROOMS.map(room => (
-                    <button
-                      key={room}
-                      onClick={() => handleRoomSelect(room)}
-                      className={cn(
-                        'w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium transition-all',
-                        activeRoom === room
-                          ? 'bg-primary/15 text-primary'
-                          : 'text-muted-foreground hover:bg-white/5 hover:text-white',
-                      )}
-                    >
-                      {room === 'Global' ? <Globe size={18} /> : <Hash size={18} />}
-                      <span className="flex-1 text-left">{room}</span>
-                      {activeRoom === room && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    </button>
-                  ))}
-                  {isDm && (
-                    <div className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium bg-primary/15 text-primary">
-                      <MessageCircle size={18} />
-                      <span className="flex-1 text-left">DM: {dmOtherUser}</span>
-                      <div className="w-2 h-2 rounded-full bg-primary" />
-                    </div>
-                  )}
-
-                  {/* User-created rooms section */}
-                  <div className="pt-3 mt-1 border-t border-border">
-                    <div className="flex items-center justify-between px-1 mb-2">
-                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">My Rooms</span>
-                      <button onClick={() => { setMobilePanel(null); setCreateRoomOpen(true); }}
-                        className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors">
-                        <Plus size={13} />
-                      </button>
-                    </div>
-                    {userRooms.length === 0 ? (
-                      <button onClick={() => { setMobilePanel(null); setCreateRoomOpen(true); }}
-                        className="w-full text-xs text-muted-foreground text-center py-3 rounded-2xl hover:bg-white/5 transition-colors">
-                        + Create your first room
-                      </button>
-                    ) : userRooms.map(room => (
-                      <div key={room.id} className={cn(
-                        'w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium transition-all group',
-                        activeRoom === room.roomKey ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white',
-                      )}>
-                        <button className="flex items-center gap-3 flex-1 min-w-0 text-left" onClick={() => handleJoinRoom(room)}>
-                          {room.isPrivate ? <Lock size={16} className="flex-shrink-0" /> : <Hash size={16} className="flex-shrink-0" />}
-                          <span className="flex-1 truncate">{room.name}</span>
-                          {joiningRoomId === room.id && <Loader2 size={14} className="animate-spin flex-shrink-0" />}
-                          {!room.isMember && room.isPrivate && <Clock size={13} className="text-yellow-500 flex-shrink-0" />}
-                          {activeRoom === room.roomKey && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
-                        </button>
-                        {room.isOwner && room.pendingCount > 0 && (
-                          <button onClick={() => { setMobilePanel(null); openRequests(room); }}
-                            className="flex-shrink-0 w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 text-[10px] font-bold flex items-center justify-center">
-                            {room.pendingCount}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex-1 overflow-y-auto px-3 pb-2">
+                  {renderRoomList(() => setMobilePanel(null))}
                 </div>
                 <div className="px-3 pt-2 pb-4 flex-shrink-0">
                   <button
@@ -418,14 +615,14 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Friends panel */}
+            {/* Mobile Friends panel */}
             {mobilePanel === 'friends' && (
               <div className="flex-1 min-h-0 overflow-hidden">
                 <FriendsPanel onDmUser={handleDmUser} />
               </div>
             )}
 
-            {/* People / online users panel */}
+            {/* Mobile People panel */}
             {mobilePanel === 'people' && (
               <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
                 <div className="flex items-center gap-2 mb-1">
@@ -452,7 +649,6 @@ export default function Dashboard() {
                         <button
                           onClick={() => handleDmUser(u.username)}
                           className="p-2 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary transition-colors flex-shrink-0"
-                          title={`Message ${u.username}`}
                         >
                           <MessageCircle size={16} />
                         </button>
@@ -514,81 +710,8 @@ export default function Dashboard() {
 
           {sidebarTab === 'rooms' ? (
             <>
-              <div className="flex-1 overflow-y-auto p-4 space-y-1">
-                <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3 ml-1">Chat Rooms</h3>
-                {ROOMS.map(room => (
-                  <button
-                    key={room}
-                    onClick={() => handleRoomSelect(room)}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all',
-                      activeRoom === room
-                        ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
-                        : 'text-muted-foreground hover:bg-white/5 hover:text-white',
-                    )}
-                  >
-                    {room === 'Global' ? <Globe size={18} /> : <Hash size={18} />}
-                    {room}
-                    {activeRoom === room && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />}
-                  </button>
-                ))}
-                {isDm && (
-                  <div className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]">
-                    <MessageCircle size={18} />
-                    DM: {dmOtherUser}
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
-                  </div>
-                )}
-
-                {/* User-created rooms */}
-                <div className="pt-4 mt-2 border-t border-border">
-                  <div className="flex items-center justify-between mb-2 ml-1">
-                    <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">My Rooms</h3>
-                    <button
-                      onClick={() => setCreateRoomOpen(true)}
-                      className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors"
-                      title="Create room"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  {userRooms.length === 0 ? (
-                    <button
-                      onClick={() => setCreateRoomOpen(true)}
-                      className="w-full text-xs text-muted-foreground hover:text-white text-center py-3 rounded-xl hover:bg-white/5 transition-colors"
-                    >
-                      + Create your first room
-                    </button>
-                  ) : userRooms.map(room => (
-                    <div key={room.id} className={cn(
-                      'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group',
-                      activeRoom === room.roomKey
-                        ? 'bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]'
-                        : 'text-muted-foreground hover:bg-white/5 hover:text-white',
-                    )}>
-                      <button className="flex items-center gap-2.5 flex-1 min-w-0 text-left" onClick={() => handleJoinRoom(room)}>
-                        {room.isPrivate ? <Lock size={15} className="flex-shrink-0" /> : <Hash size={15} className="flex-shrink-0" />}
-                        <span className="truncate flex-1">{room.name}</span>
-                        {!room.isMember && (
-                          room.isPrivate
-                            ? <Clock size={12} className="flex-shrink-0 text-yellow-500" title="Request to join" />
-                            : <Plus size={12} className="flex-shrink-0 opacity-0 group-hover:opacity-100" />
-                        )}
-                        {joiningRoomId === room.id && <Loader2 size={12} className="animate-spin flex-shrink-0" />}
-                      </button>
-                      {room.isOwner && room.pendingCount > 0 && (
-                        <button
-                          onClick={() => openRequests(room)}
-                          className="flex-shrink-0 w-5 h-5 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-[10px] font-bold hover:bg-yellow-500/30 transition-colors"
-                          title={`${room.pendingCount} join request(s)`}
-                        >
-                          {room.pendingCount}
-                        </button>
-                      )}
-                      {activeRoom === room.roomKey && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
-                    </div>
-                  ))}
-                </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                {renderRoomList()}
               </div>
               <div className="p-4 border-t border-border bg-black/20 flex-shrink-0">
                 <button
@@ -681,6 +804,24 @@ export default function Dashboard() {
                     </h2>
                     {!isDm && <span className="text-xs text-muted-foreground hidden lg:block">{currentOnlineUsers.length} online</span>}
                   </div>
+
+                  {/* Room owner settings button */}
+                  {isUserRoom && isRoomOwner && activeUserRoom && (
+                    <button
+                      onClick={() => openManage(activeUserRoom)}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-white transition-colors text-xs font-medium"
+                      title="Manage room"
+                    >
+                      <Settings size={14} />
+                      <span className="hidden sm:inline">Manage</span>
+                      {activeUserRoom.pendingCount > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-yellow-500 text-black text-[9px] font-bold flex items-center justify-center">
+                          {activeUserRoom.pendingCount}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
                   {isDm && (
                     <button
                       onClick={() => handleRoomSelect('Global')}
@@ -702,7 +843,7 @@ export default function Dashboard() {
             {/* Messages */}
             <div
               ref={scrollRef}
-              className="flex-1 min-h-0 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-6 scroll-smooth"
+              className="flex-1 min-h-0 overflow-y-auto p-3 lg:p-6 space-y-3 lg:space-y-5 scroll-smooth"
             >
               {currentMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
@@ -800,7 +941,7 @@ export default function Dashboard() {
           {matchState !== 'matched' && (
             <nav className="lg:hidden flex-shrink-0 border-t border-border bg-card/95 backdrop-blur-md safe-area-bottom">
               <div className="flex items-stretch">
-                {/* Current room indicator (left) */}
+                {/* Current room indicator */}
                 <div className="flex-1 flex items-center gap-1.5 px-3 py-2.5 min-w-0">
                   {isDm
                     ? <MessageCircle size={14} className="text-primary flex-shrink-0" />
@@ -812,9 +953,23 @@ export default function Dashboard() {
                   <span className="text-xs font-semibold text-white truncate">
                     {isDm ? `DM: ${dmOtherUser}` : isUserRoom ? (activeUserRoom?.name || activeRoom) : activeRoom}
                   </span>
+                  {/* Mobile room manage button */}
+                  {isUserRoom && isRoomOwner && activeUserRoom && (
+                    <button
+                      onClick={() => openManage(activeUserRoom)}
+                      className="ml-1 p-1 rounded-lg text-muted-foreground hover:text-white transition-colors flex-shrink-0 relative"
+                    >
+                      <Settings size={13} />
+                      {activeUserRoom.pendingCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-yellow-500 text-black text-[8px] font-bold flex items-center justify-center">
+                          {activeUserRoom.pendingCount}
+                        </span>
+                      )}
+                    </button>
+                  )}
                 </div>
 
-                {/* Tab buttons (right) */}
+                {/* Tab buttons */}
                 <div className="flex items-stretch border-l border-border">
                   <button
                     onClick={() => toggleMobilePanel('rooms')}
@@ -857,7 +1012,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Desktop Right Sidebar */}
+        {/* Desktop Right Sidebar - Online users */}
         {matchState !== 'matched' && !isDm && (
           <aside className="w-64 bg-card border-l border-border hidden lg:flex flex-col flex-shrink-0">
             <div className="p-5 border-b border-border flex-shrink-0">

@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { AudioPlayer } from './AudioPlayer';
 import { cn } from '@/lib/utils';
 import { useStore, type MessageWithReactions } from '@/store';
-import { Edit2, Trash2, Reply, Smile } from 'lucide-react';
+import { Edit2, Trash2, Reply, MoreVertical } from 'lucide-react';
 
 interface ChatBubbleProps {
   message: MessageWithReactions;
@@ -20,6 +20,7 @@ const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👏', 
 export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, onReact }: ChatBubbleProps) {
   const currentUser = useStore(s => s.user);
   const isMe = currentUser?.username === message.username;
+  const [showDots, setShowDots] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -29,9 +30,10 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
   const longPressTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
-    if (!showActions && !showEmojiPicker) return;
+    if (!showActions && !showEmojiPicker && !showDots) return;
     const handleOutside = (e: MouseEvent | TouchEvent) => {
       if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) {
+        setShowDots(false);
         setShowActions(false);
         setShowEmojiPicker(false);
       }
@@ -42,11 +44,12 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
       document.removeEventListener('mousedown', handleOutside);
       document.removeEventListener('touchstart', handleOutside);
     };
-  }, [showActions, showEmojiPicker]);
+  }, [showActions, showEmojiPicker, showDots]);
 
   const handleTouchStart = () => {
     longPressTimer.current = setTimeout(() => {
       setShowActions(true);
+      setShowDots(false);
     }, 450);
   };
 
@@ -64,6 +67,21 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
     onReact?.(message.id, emoji);
     setShowEmojiPicker(false);
     setShowActions(false);
+    setShowDots(false);
+  };
+
+  const handleDotsClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowActions(true);
+    setShowDots(false);
+  };
+
+  const handleMouseEnter = () => {
+    if (!showActions) setShowDots(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (!showActions && !showEmojiPicker) setShowDots(false);
   };
 
   if (message.isDeleted) {
@@ -90,17 +108,15 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
       ref={bubbleRef}
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      className={cn("flex w-full gap-2 lg:gap-3 max-w-[88%] lg:max-w-[85%] group relative", isMe ? "ml-auto flex-row-reverse" : "")}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => {
-        if (!showEmojiPicker) setShowActions(false);
-      }}
+      className={cn("flex w-full gap-2 lg:gap-3 max-w-[88%] lg:max-w-[85%] relative", isMe ? "ml-auto flex-row-reverse" : "")}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchMove={handleTouchEnd}
     >
       {/* Avatar */}
-      <div className="flex-shrink-0 w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-lg lg:text-xl shadow-sm">
+      <div className="flex-shrink-0 w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-lg lg:text-xl shadow-sm self-end mb-1">
         {message.avatar}
       </div>
 
@@ -125,47 +141,76 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
           </div>
         )}
 
-        {/* Message bubble */}
-        <div className={cn(
-          "px-3 lg:px-4 py-2 lg:py-2.5 rounded-2xl shadow-sm relative",
-          isMe
-            ? "bg-primary text-primary-foreground rounded-tr-sm"
-            : "bg-secondary text-secondary-foreground rounded-tl-sm border border-white/5"
-        )}>
-          {isEditing ? (
-            <div className="flex items-center gap-2 min-w-[160px]">
-              <input
-                ref={editInputRef}
-                autoFocus
-                className="bg-transparent text-[15px] leading-relaxed outline-none flex-1 min-w-0"
-                value={editContent}
-                onChange={e => setEditContent(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') handleEditSubmit();
-                  if (e.key === 'Escape') setIsEditing(false);
-                }}
-              />
-              <button
-                onClick={handleEditSubmit}
-                className="text-xs font-semibold opacity-80 hover:opacity-100 underline whitespace-nowrap"
-              >Save</button>
-              <button
-                onClick={() => setIsEditing(false)}
-                className="text-xs opacity-60 hover:opacity-100"
-              >✕</button>
-            </div>
-          ) : (
-            message.messageType === 'audio' && message.audioUrl ? (
-              <AudioPlayer src={message.audioUrl} className={isMe ? "bg-black/20" : ""} />
+        {/* Message bubble with emoji picker floating above it */}
+        <div className="relative">
+          {/* Emoji picker - floats ABOVE the message bubble */}
+          <AnimatePresence>
+            {showEmojiPicker && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.92 }}
+                onClick={e => e.stopPropagation()}
+                className={cn(
+                  "absolute bottom-full mb-2 z-40 flex gap-1 bg-card border border-border rounded-2xl p-2 shadow-2xl",
+                  isMe ? "right-0" : "left-0"
+                )}
+              >
+                {QUICK_EMOJIS.map(e => (
+                  <button
+                    key={e}
+                    onClick={() => handleReact(e)}
+                    className="text-lg hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/10 active:scale-110"
+                  >
+                    {e}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* The bubble itself */}
+          <div className={cn(
+            "px-3 lg:px-4 py-2 lg:py-2.5 rounded-2xl shadow-sm",
+            isMe
+              ? "bg-primary text-primary-foreground rounded-tr-sm"
+              : "bg-secondary text-secondary-foreground rounded-tl-sm border border-white/5"
+          )}>
+            {isEditing ? (
+              <div className="flex items-center gap-2 min-w-[160px]">
+                <input
+                  ref={editInputRef}
+                  autoFocus
+                  className="bg-transparent text-[15px] leading-relaxed outline-none flex-1 min-w-0"
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleEditSubmit();
+                    if (e.key === 'Escape') setIsEditing(false);
+                  }}
+                />
+                <button
+                  onClick={handleEditSubmit}
+                  className="text-xs font-semibold opacity-80 hover:opacity-100 underline whitespace-nowrap"
+                >Save</button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="text-xs opacity-60 hover:opacity-100"
+                >✕</button>
+              </div>
             ) : (
-              <p className="text-[14px] lg:text-[15px] leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
-            )
-          )}
+              message.messageType === 'audio' && message.audioUrl ? (
+                <AudioPlayer src={message.audioUrl} className={isMe ? "bg-black/20" : ""} />
+              ) : (
+                <p className="text-[14px] lg:text-[15px] leading-relaxed break-words whitespace-pre-wrap">{message.content}</p>
+              )
+            )}
+          </div>
         </div>
 
         {/* Reactions display */}
         {Object.keys(message.reactions || {}).length > 0 && (
-          <div className={cn("flex flex-wrap gap-1 px-1", isMe ? "justify-end" : "justify-start")}>
+          <div className={cn("flex flex-wrap gap-1 px-1 mt-0.5", isMe ? "justify-end" : "justify-start")}>
             {Object.entries(message.reactions).map(([emoji, users]) => (
               <button
                 key={emoji}
@@ -185,93 +230,88 @@ export function ChatBubble({ message, replySource, onReply, onEdit, onDelete, on
         )}
       </div>
 
-      {/* Action buttons */}
-      <AnimatePresence>
-        {showActions && !isEditing && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className={cn(
-              "absolute top-7 lg:top-8 flex items-center gap-0.5 bg-card border border-border rounded-xl shadow-xl px-1 py-1 z-20",
-              isMe ? "right-[44px] lg:right-[52px]" : "left-[44px] lg:left-[52px]"
-            )}
-          >
-            {/* React */}
-            <div className="relative">
+      {/* 3-dots trigger + action panel */}
+      <div className={cn(
+        "flex-shrink-0 self-center relative",
+        isMe ? "order-first" : ""
+      )}>
+        <AnimatePresence>
+          {/* 3-dots button (shows on hover) */}
+          {(showDots && !showActions && !isEditing) && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              onClick={handleDotsClick}
+              className="p-1.5 rounded-lg bg-card/80 border border-border shadow-md text-muted-foreground hover:text-white hover:bg-card transition-colors"
+            >
+              <MoreVertical size={14} />
+            </motion.button>
+          )}
+
+          {/* Action panel (shows after dots click or long press) */}
+          {(showActions && !isEditing) && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.88 }}
+              className={cn(
+                "absolute z-30 flex flex-col gap-0.5 bg-card border border-border rounded-2xl shadow-2xl p-1.5 min-w-[120px]",
+                isMe ? "right-full mr-2" : "left-full ml-2",
+                "top-1/2 -translate-y-1/2"
+              )}
+            >
+              {/* React */}
               <button
                 onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(p => !p); }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
-                title="React"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
               >
-                <Smile size={15} />
+                <span className="text-base">😊</span>
+                <span>React</span>
               </button>
-              <AnimatePresence>
-                {showEmojiPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 4 }}
-                    onClick={e => e.stopPropagation()}
-                    className={cn(
-                      "absolute top-full mt-1 flex gap-1 bg-card border border-border rounded-xl p-2 shadow-xl z-30",
-                      isMe ? "right-0" : "left-0"
-                    )}
-                  >
-                    {QUICK_EMOJIS.map(e => (
-                      <button
-                        key={e}
-                        onClick={() => handleReact(e)}
-                        className="text-lg hover:scale-125 transition-transform w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/10"
-                      >
-                        {e}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
 
-            {/* Reply */}
-            {onReply && (
-              <button
-                onClick={() => { onReply(message); setShowActions(false); }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
-                title="Reply"
-              >
-                <Reply size={15} />
-              </button>
-            )}
+              {/* Reply */}
+              {onReply && (
+                <button
+                  onClick={() => { onReply(message); setShowActions(false); setShowDots(false); }}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
+                >
+                  <Reply size={14} />
+                  <span>Reply</span>
+                </button>
+              )}
 
-            {/* Edit (own messages only) */}
-            {isMe && message.messageType === 'text' && onEdit && (
-              <button
-                onClick={() => {
-                  setIsEditing(true);
-                  setEditContent(message.content || '');
-                  setShowActions(false);
-                  setTimeout(() => editInputRef.current?.focus(), 50);
-                }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
-                title="Edit"
-              >
-                <Edit2 size={15} />
-              </button>
-            )}
+              {/* Edit (own text messages only) */}
+              {isMe && message.messageType === 'text' && onEdit && (
+                <button
+                  onClick={() => {
+                    setIsEditing(true);
+                    setEditContent(message.content || '');
+                    setShowActions(false);
+                    setShowDots(false);
+                    setTimeout(() => editInputRef.current?.focus(), 50);
+                  }}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-muted-foreground hover:text-white transition-colors text-sm font-medium text-left w-full"
+                >
+                  <Edit2 size={14} />
+                  <span>Edit</span>
+                </button>
+              )}
 
-            {/* Delete (own messages only) */}
-            {isMe && onDelete && (
-              <button
-                onClick={() => { onDelete(message.id); setShowActions(false); }}
-                className="p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                title="Delete"
-              >
-                <Trash2 size={15} />
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+              {/* Delete (own messages only) */}
+              {isMe && onDelete && (
+                <button
+                  onClick={() => { onDelete(message.id); setShowActions(false); setShowDots(false); }}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-500/15 text-muted-foreground hover:text-red-400 transition-colors text-sm font-medium text-left w-full"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete</span>
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 }
