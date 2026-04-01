@@ -52,6 +52,13 @@ interface AppState {
 
   activeDm: string | null;
   setActiveDm: (username: string | null) => void;
+
+  unreadDmRooms: string[];
+  addUnreadDmRoom: (room: string) => void;
+  clearUnreadDmRoom: (room: string) => void;
+
+  pendingFriendRequestCount: number;
+  setPendingFriendRequestCount: (count: number) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -90,6 +97,17 @@ export const useStore = create<AppState>()(
 
       activeDm: null,
       setActiveDm: (username) => set({ activeDm: username }),
+
+      unreadDmRooms: [],
+      addUnreadDmRoom: (room) => set((s) => ({
+        unreadDmRooms: s.unreadDmRooms.includes(room) ? s.unreadDmRooms : [...s.unreadDmRooms, room],
+      })),
+      clearUnreadDmRoom: (room) => set((s) => ({
+        unreadDmRooms: s.unreadDmRooms.filter(r => r !== room),
+      })),
+
+      pendingFriendRequestCount: 0,
+      setPendingFriendRequestCount: (count) => set({ pendingFriendRequestCount: count }),
     }),
     {
       name: 'litchat-storage',

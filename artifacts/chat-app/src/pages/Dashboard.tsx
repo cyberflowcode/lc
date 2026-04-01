@@ -56,6 +56,8 @@ export default function Dashboard() {
     matchState, matchPartner, matchMessages,
     roomUsers, allOnlineUsers, totalOnlineCount,
     replyTo, setReplyTo,
+    unreadDmRooms, clearUnreadDmRoom,
+    pendingFriendRequestCount, setPendingFriendRequestCount,
   } = useStore();
   const { toast } = useToast();
 

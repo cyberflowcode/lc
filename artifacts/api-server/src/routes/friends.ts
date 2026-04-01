@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, friendshipsTable } from "@workspace/db";
 import { eq, and, or } from "drizzle-orm";
 import { authenticate } from "../middlewares/authenticate.js";
+import { emitToUser } from "../lib/socketHandler.js";
 
 const router: IRouter = Router();
 
@@ -72,6 +73,9 @@ router.post("/friends/request/:username", async (req, res): Promise<void> => {
     .values({ requester: me, recipient: target, status: "pending" })
     .returning();
 
+  // Notify recipient in real-time
+  emitToUser(target, "friend-request", { id: friendship.id, requester: me, recipient: target, status: "pending" });
+
   res.status(201).json(friendship);
 });
 
@@ -100,6 +104,11 @@ router.post("/friends/accept/:requestId", async (req, res): Promise<void> => {
     .set({ status: "accepted" })
     .where(eq(friendshipsTable.id, requestId))
     .returning();
+
+  // Notify requester in real-time
+  emitToUser(friendship.requester, "friend-accepted", { id: updated.id, requester: updated.requester, recipient: updated.recipient, status: "accepted" });
+  // Also notify the accepter so their own friends list updates
+  emitToUser(username, "friend-accepted", { id: updated.id, requester: updated.requester, recipient: updated.recipient, status: "accepted" });
 
   res.json(updated);
 });

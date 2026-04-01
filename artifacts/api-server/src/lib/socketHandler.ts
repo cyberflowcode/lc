@@ -22,6 +22,12 @@ const connectedUsers = new Map<string, ConnectedUser>();
 const matchQueue: MatchQueue[] = [];
 const activeMatches = new Map<string, string>();
 
+let _io: SocketIOServer | null = null;
+
+export function emitToUser(username: string, event: string, data: any): void {
+  _io?.to(`inbox:${username}`).emit(event, data);
+}
+
 async function buildMessageWithReactions(message: typeof messagesTable.$inferSelect) {
   const reactions = await db
     .select()
@@ -37,13 +43,20 @@ async function buildMessageWithReactions(message: typeof messagesTable.$inferSel
 }
 
 export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
-  const io = new SocketIOServer(httpServer, {
+  _io = new SocketIOServer(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
     path: "/api/socket.io",
   });
 
-  io.on("connection", (socket) => {
+  _io.on("connection", (socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
+
+    socket.on("setup-inbox", ({ token }: { token: string }) => {
+      const payload = verifyToken(token);
+      if (!payload) return;
+      socket.join(`inbox:${payload.username}`);
+      logger.info({ username: payload.username }, "User joined inbox room");
+    });
 
     socket.on("join-room", async ({ room, token }: { room: string; token: string }) => {
       const payload = verifyToken(token);
@@ -51,6 +64,9 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         socket.emit("error", { message: "Invalid token" });
         return;
       }
+
+      // Always join the personal inbox room
+      socket.join(`inbox:${payload.username}`);
 
       if (room.startsWith("room:")) {
         const roomId = parseInt(room.split(":")[1]);
@@ -75,7 +91,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       const existing = connectedUsers.get(socket.id);
       if (existing?.currentRoom) {
         socket.leave(existing.currentRoom);
-        emitRoomUsers(io, existing.currentRoom);
+        emitRoomUsers(_io!, existing.currentRoom);
       }
 
       socket.join(room);
@@ -87,8 +103,8 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       });
 
       logger.info({ username: payload.username, room }, "User joined room");
-      emitRoomUsers(io, room);
-      emitAllUsers(io);
+      emitRoomUsers(_io!, room);
+      emitAllUsers(_io!);
     });
 
     socket.on("leave-room", ({ room }: { room: string }) => {
@@ -98,7 +114,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         user.currentRoom = null;
         connectedUsers.set(socket.id, user);
       }
-      emitRoomUsers(io, room);
+      emitRoomUsers(_io!, room);
     });
 
     socket.on("chat-message", async ({ room, content, messageType, audioUrl, replyToId }: any) => {
@@ -117,7 +133,20 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           replyToId: replyToId || null,
         }).returning();
 
-        io.to(room).emit("message", { ...message, reactions: {} });
+        const payload = { ...message, reactions: {} };
+        _io!.to(room).emit("message", payload);
+
+        // For DMs, send real-time notification to both users' inboxes
+        if (room.startsWith("dm:")) {
+          const parts = room.slice(3).split(":");
+          for (const uname of parts) {
+            _io!.to(`inbox:${uname}`).emit("dm-notification", {
+              room,
+              message: payload,
+              fromUsername: user.username,
+            });
+          }
+        }
       } catch (err) {
         logger.error({ err }, "Error saving message");
       }
@@ -138,7 +167,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           .returning();
 
         const withReactions = await buildMessageWithReactions(updated);
-        io.to(room).emit("message-updated", withReactions);
+        _io!.to(room).emit("message-updated", withReactions);
       } catch (err) {
         logger.error({ err }, "Error editing message");
       }
@@ -159,7 +188,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           .returning();
 
         const withReactions = await buildMessageWithReactions(updated);
-        io.to(room).emit("message-updated", withReactions);
+        _io!.to(room).emit("message-updated", withReactions);
       } catch (err) {
         logger.error({ err }, "Error deleting message");
       }
@@ -191,7 +220,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         if (!msg) return;
 
         const withReactions = await buildMessageWithReactions(msg);
-        io.to(room).emit("message-updated", withReactions);
+        _io!.to(room).emit("message-updated", withReactions);
       } catch (err) {
         logger.error({ err }, "Error reacting to message");
       }
@@ -212,7 +241,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         const roomKey = `room:${roomId}`;
         for (const [socketId, connUser] of connectedUsers) {
           if (connUser.username === username) {
-            io.to(socketId).emit("kicked-from-room", { roomId, roomKey });
+            _io!.to(socketId).emit("kicked-from-room", { roomId, roomKey });
           }
         }
 
@@ -240,7 +269,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         await db.delete(roomMembersTable).where(eq(roomMembersTable.roomId, roomId));
         await db.delete(roomsTable).where(eq(roomsTable.id, roomId));
 
-        io.to(roomKey).emit("room-deleted", { roomId, roomKey });
+        _io!.to(roomKey).emit("room-deleted", { roomId, roomKey });
         logger.info({ owner: payload.username, roomId }, "Room deleted");
       } catch (err) {
         logger.error({ err }, "Error deleting room");
@@ -267,7 +296,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         activeMatches.set(partner.socketId, socket.id);
 
         socket.join(matchId);
-        io.sockets.sockets.get(partner.socketId)?.join(matchId);
+        _io!.sockets.sockets.get(partner.socketId)?.join(matchId);
 
         db.insert(matchSessionsTable).values({
           matchId,
@@ -276,7 +305,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
         }).catch(err => logger.error({ err }, "Failed to save match session"));
 
         socket.emit("match-found", { matchId, partner: { username: partner.username, avatar: partner.avatar } });
-        io.to(partner.socketId).emit("match-found", { matchId, partner: { username: payload.username, avatar: payload.avatar } });
+        _io!.to(partner.socketId).emit("match-found", { matchId, partner: { username: payload.username, avatar: payload.avatar } });
       } else {
         matchQueue.push({ socketId: socket.id, username: payload.username, avatar: payload.avatar });
         socket.emit("waiting-for-match", { message: "Searching for a match..." });
@@ -295,7 +324,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
           audioUrl: audioUrl ?? null,
           messageType,
         }).returning();
-        io.to(matchId).emit("match-message", { ...saved, reactions: {} });
+        _io!.to(matchId).emit("match-message", { ...saved, reactions: {} });
       } catch (err) {
         logger.error({ err }, "Failed to save match message");
       }
@@ -304,7 +333,7 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
     socket.on("exit-match", () => {
       const partnerId = activeMatches.get(socket.id);
       if (partnerId) {
-        io.to(partnerId).emit("match-ended", { message: "Your match partner has left" });
+        _io!.to(partnerId).emit("match-ended", { message: "Your match partner has left" });
         activeMatches.delete(partnerId);
       }
       activeMatches.delete(socket.id);
@@ -314,19 +343,19 @@ export function setupSocketIO(httpServer: HttpServer): SocketIOServer {
       const user = connectedUsers.get(socket.id);
       const partnerId = activeMatches.get(socket.id);
       if (partnerId) {
-        io.to(partnerId).emit("match-ended", { message: "Your match partner has disconnected" });
+        _io!.to(partnerId).emit("match-ended", { message: "Your match partner has disconnected" });
         activeMatches.delete(partnerId);
       }
       activeMatches.delete(socket.id);
       const queueIdx = matchQueue.findIndex((q) => q.socketId === socket.id);
       if (queueIdx !== -1) matchQueue.splice(queueIdx, 1);
-      if (user?.currentRoom) emitRoomUsers(io, user.currentRoom);
+      if (user?.currentRoom) emitRoomUsers(_io!, user.currentRoom);
       connectedUsers.delete(socket.id);
-      emitAllUsers(io);
+      emitAllUsers(_io!);
     });
   });
 
-  return io;
+  return _io;
 }
 
 function emitRoomUsers(io: SocketIOServer, room: string): void {
