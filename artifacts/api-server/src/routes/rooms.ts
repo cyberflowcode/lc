@@ -57,6 +57,13 @@ router.post("/rooms", authenticate, async (req, res): Promise<void> => {
   if (!name?.trim()) { res.status(400).json({ error: "Room name is required" }); return; }
 
   try {
+    // Enforce 2-room limit per user
+    const ownedRooms = await db.select().from(roomsTable).where(eq(roomsTable.createdBy, username));
+    if (ownedRooms.length >= 2) {
+      res.status(400).json({ error: "You can only create up to 2 rooms" });
+      return;
+    }
+
     const [room] = await db.insert(roomsTable).values({
       name: name.trim(),
       description: description?.trim() || null,

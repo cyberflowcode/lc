@@ -16,7 +16,8 @@ interface UserResult {
 }
 
 export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
-  const { token, user } = useStore();
+  const { token, user, allOnlineUsers } = useStore();
+  const onlineUsernames = new Set(allOnlineUsers.map(u => u.username));
   const { toast } = useToast();
   const [addUsername, setAddUsername] = useState('');
   const [searchResults, setSearchResults] = useState<UserResult[]>([]);
@@ -260,12 +261,20 @@ export function FriendsPanel({ onDmUser }: FriendsPanelProps) {
           ) : (
             friends.map((f: any) => {
               const name = getFriendName(f);
+              const isOnline = onlineUsernames.has(name);
               return (
                 <div key={f.id} className="flex items-center gap-2 p-2 rounded-xl hover:bg-white/5 group">
-                  <div className="w-8 h-8 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-base flex-shrink-0">
-                    💬
+                  <div className="relative w-8 h-8 rounded-full bg-secondary border border-white/5 flex items-center justify-center text-base flex-shrink-0">
+                    {name[0].toUpperCase()}
+                    <span className={cn(
+                      'absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-card',
+                      isOnline ? 'bg-green-500' : 'bg-gray-500'
+                    )} />
                   </div>
-                  <span className="flex-1 text-sm font-medium text-white/90 truncate">{name}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-white/90 truncate block">{name}</span>
+                    <span className={cn('text-[10px]', isOnline ? 'text-green-400' : 'text-muted-foreground')}>{isOnline ? 'Online' : 'Offline'}</span>
+                  </div>
                   <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onDmUser(name)}

@@ -36,8 +36,8 @@ export function CreateRoomModal({ open, onClose, onCreated }: CreateRoomModalPro
           password: isPrivate && password.trim() ? password.trim() : undefined,
         }),
       });
-      if (!res.ok) throw new Error('Failed to create room');
       const room = await res.json();
+      if (!res.ok) throw new Error(room.error || 'Failed to create room');
       onCreated(room);
       setName('');
       setDescription('');

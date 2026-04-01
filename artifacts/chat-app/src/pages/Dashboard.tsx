@@ -419,20 +419,20 @@ export default function Dashboard() {
         </button>
       ))}
 
-      {isDm && (
-        <div className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium bg-primary/15 text-primary shadow-[inset_4px_0_0_0_hsl(var(--primary))]">
-          <MessageCircle size={18} />
-          DM: {dmOtherUser}
-          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
-        </div>
-      )}
-
       {/* User-created rooms */}
       <div className="pt-4 mt-2 border-t border-border">
         <div className="flex items-center justify-between mb-2 px-1">
           <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rooms</h3>
           <button
-            onClick={() => { closeMobile?.(); setCreateRoomOpen(true); }}
+            onClick={() => {
+              const ownedCount = userRooms.filter(r => r.isOwner).length;
+              if (ownedCount >= 2) {
+                toast({ variant: 'destructive', description: 'You can only create up to 2 rooms.' });
+                return;
+              }
+              closeMobile?.();
+              setCreateRoomOpen(true);
+            }}
             className="w-6 h-6 rounded-lg bg-white/5 hover:bg-primary/20 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors"
             title="Create room"
           >
@@ -1278,47 +1278,104 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Desktop Right Sidebar - Online users */}
+        {/* Desktop Right Sidebar */}
         {matchState !== 'matched' && !isDm && (
           <aside className="w-64 bg-card border-l border-border hidden lg:flex flex-col flex-shrink-0">
-            <div className="p-5 border-b border-border flex-shrink-0">
-              <h3 className="font-bold flex items-center gap-2 text-white">
-                <Users size={18} className="text-primary" />
-                Online
-                <span className="ml-auto bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded-full border border-green-500/30">
-                  {totalOnlineCount}
-                </span>
-              </h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {allOnlineUsers.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center mt-4">No one online yet</p>
-              ) : (
-                allOnlineUsers.map((u, i) => (
-                  <div key={`${u.username}-${i}`} className="flex items-center gap-3 group">
-                    <div className="relative flex-shrink-0">
-                      <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-base border border-white/5 group-hover:border-primary/50 transition-colors">
-                        {u.avatar}
+            {isUserRoom ? (
+              <>
+                <div className="p-5 border-b border-border flex-shrink-0">
+                  <h3 className="font-bold flex items-center gap-2 text-white">
+                    <Users size={18} className="text-primary" />
+                    In Room
+                    <span className="ml-auto bg-primary/20 text-primary text-xs font-bold px-2 py-0.5 rounded-full border border-primary/30">
+                      {currentOnlineUsers.length}
+                    </span>
+                  </h3>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {currentOnlineUsers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center mt-4">No one in this room yet</p>
+                  ) : (
+                    [...currentOnlineUsers]
+                      .sort((a, b) => {
+                        if (a.username === activeUserRoom?.createdBy) return -1;
+                        if (b.username === activeUserRoom?.createdBy) return 1;
+                        return 0;
+                      })
+                      .map((u, i) => {
+                        const isOwner = u.username === activeUserRoom?.createdBy;
+                        return (
+                          <div key={`${u.username}-${i}`} className="flex items-center gap-3 group">
+                            <div className="relative flex-shrink-0">
+                              <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-base border border-white/5 group-hover:border-primary/50 transition-colors">
+                                {u.avatar}
+                              </div>
+                              <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-card rounded-full" />
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-sm font-semibold text-white/90 truncate flex items-center gap-1">
+                                {u.username}
+                                {isOwner && <Crown size={10} className="text-yellow-400 flex-shrink-0" />}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">{isOwner ? 'Owner' : 'Member'}</span>
+                            </div>
+                            {u.username !== user.username && (
+                              <button
+                                onClick={() => handleDmUser(u.username!)}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/20 text-muted-foreground hover:text-primary transition-all"
+                                title={`Message ${u.username}`}
+                              >
+                                <MessageCircle size={14} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-5 border-b border-border flex-shrink-0">
+                  <h3 className="font-bold flex items-center gap-2 text-white">
+                    <Users size={18} className="text-primary" />
+                    Online
+                    <span className="ml-auto bg-green-500/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded-full border border-green-500/30">
+                      {totalOnlineCount}
+                    </span>
+                  </h3>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {allOnlineUsers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center mt-4">No one online yet</p>
+                  ) : (
+                    allOnlineUsers.map((u, i) => (
+                      <div key={`${u.username}-${i}`} className="flex items-center gap-3 group">
+                        <div className="relative flex-shrink-0">
+                          <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-base border border-white/5 group-hover:border-primary/50 transition-colors">
+                            {u.avatar}
+                          </div>
+                          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-card rounded-full" />
+                        </div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="text-sm font-semibold text-white/90 truncate">{u.username}</span>
+                          <span className="text-[10px] text-muted-foreground truncate">{u.room || 'Online'}</span>
+                        </div>
+                        {u.username !== user.username && (
+                          <button
+                            onClick={() => handleDmUser(u.username)}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/20 text-muted-foreground hover:text-primary transition-all"
+                            title={`Message ${u.username}`}
+                          >
+                            <MessageCircle size={14} />
+                          </button>
+                        )}
                       </div>
-                      <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-card rounded-full" />
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-sm font-semibold text-white/90 truncate">{u.username}</span>
-                      <span className="text-[10px] text-muted-foreground truncate">{u.room || 'Online'}</span>
-                    </div>
-                    {u.username !== user.username && (
-                      <button
-                        onClick={() => handleDmUser(u.username)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-primary/20 text-muted-foreground hover:text-primary transition-all"
-                        title={`Message ${u.username}`}
-                      >
-                        <MessageCircle size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </aside>
         )}
       </div>
